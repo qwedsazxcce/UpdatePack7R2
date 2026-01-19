@@ -34,8 +34,8 @@ jobs:
         curl -L -o vcredist_x64_2022_WinAll_14.44.35211.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/vcredist_x64_2022_WinAll_14.44.35211.WA
 
         # 下载Windows7x64ALL.wim镜像
-        curl -L -o ${{env.FILE_NAME}}.7z.001 https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.001
-        curl -L -o ${{env.FILE_NAME}}.7z.002 https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.002
+        curl -L -o ${{env.FILE_NAME}}.7z.001 https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Win7_SP1_Ult_Ent/install_Windows7x64ULTIMATE.7z.001
+        curl -L -o ${{env.FILE_NAME}}.7z.002 https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Win7_SP1_Ult_Ent/install_Windows7x64ULTIMATE.7z.002
         7z x ${{env.FILE_NAME}}.7z.001
         ls
 

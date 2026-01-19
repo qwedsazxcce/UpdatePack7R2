@@ -25,8 +25,8 @@ jobs:
             "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.002"
             "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.001"
             "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.002"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x64ENTERPRISE.7z.001"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x64ENTERPRISE.7z.002"
+            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.001"
+            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.002"
           )
 
           # 遍历链接逐个下载

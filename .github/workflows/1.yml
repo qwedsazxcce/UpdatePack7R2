@@ -1,4 +1,4 @@
-name: 逐个下载上传Win7工具到Misc Releases（修正参数版）
+name: 逐个下载上传Win7工具到Misc Releases（最终稳定版）
 
 on:
   workflow_dispatch:  # 手动触发
@@ -8,36 +8,45 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 180
     steps:
-      # 步骤1：检出仓库
+      # 步骤1：检出仓库（必选）
       - name: 检出代码仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # ===================== 逐个处理文件 =====================
+      # ===================== 逐个处理文件（改用curl.exe，无PowerShell参数坑） =====================
       # 第1个文件：UpdatePack7R2-26.1.15.exe
       - name: 下载文件1 - UpdatePack7R2-26.1.15.exe
-        shell: pwsh
+        shell: cmd  # 用cmd执行curl，更稳定
         id: download_1
         run: |
-          $filename = "UpdatePack7R2-26.1.15.exe"
-          $url = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/UpdatePack7R2/UpdatePack7R2-26.1.15.exe"
+          @echo off
+          set "filename=UpdatePack7R2-26.1.15.exe"
+          set "url=https://github.com/yuanpeirong/UpdatePack7R2/releases/download/UpdatePack7R2/UpdatePack7R2-26.1.15.exe"
           
-          Write-Host "=== 开始下载文件1：$filename ==="
-          Invoke-WebRequest -Uri $url -OutFile $filename `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-            -MaximumRetryCount 10 `
-            -RetryIntervalSec 15 `
-            -TimeoutSec 3600
+          echo === 开始下载文件1：%filename% ===
+          :: Windows自带curl，参数适配所有链接（GitHub/GitLab通用）
+          curl.exe -L -o "%filename%" ^
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ^
+            --retry 10 ^
+            --retry-delay 15 ^
+            --max-time 3600 ^
+            "%url%"
 
-          if (Test-Path $filename -PathType Leaf) {
-            $size = (Get-Item $filename).Length / 1MB
-            Write-Host "✅ 文件1下载成功，大小：$($size.ToString('0.00')) MB"
-            echo "FILE1_NAME=$filename" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "❌ 文件1下载失败！"
+          :: 校验文件是否存在且非空
+          if exist "%filename%" (
+            for %%f in ("%filename%") do set "filesize=%%~zf"
+            if !filesize! gtr 0 (
+              echo ✅ 文件1下载成功，大小：!filesize! 字节
+              echo FILE1_NAME=%filename% >> %GITHUB_ENV%
+            ) else (
+              echo ❌ 文件1下载失败：文件为空！
+              exit 1
+            )
+          ) else (
+            echo ❌ 文件1下载失败：文件不存在！
             exit 1
-          }
+          )
 
       - name: 上传文件1到Misc Releases
         uses: softprops/action-gh-release@v1
@@ -53,27 +62,34 @@ jobs:
 
       # 第2个文件：dotNetFx48_20251014_x64.WA
       - name: 下载文件2 - dotNetFx48_20251014_x64.WA
-        shell: pwsh
+        shell: cmd
         id: download_2
         run: |
-          $filename = "dotNetFx48_20251014_x64.WA"
-          $url = "https://github.com/abbodi1406/dotNetFx4xW7A/releases/download/25.10.14/dotNetFx48_20251014_x64.WA"
+          @echo off
+          set "filename=dotNetFx48_20251014_x64.WA"
+          set "url=https://github.com/abbodi1406/dotNetFx4xW7A/releases/download/25.10.14/dotNetFx48_20251014_x64.WA"
           
-          Write-Host "=== 开始下载文件2：$filename ==="
-          Invoke-WebRequest -Uri $url -OutFile $filename `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-            -MaximumRetryCount 10 `
-            -RetryIntervalSec 15 `
-            -TimeoutSec 3600
+          echo === 开始下载文件2：%filename% ===
+          curl.exe -L -o "%filename%" ^
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ^
+            --retry 10 ^
+            --retry-delay 15 ^
+            --max-time 3600 ^
+            "%url%"
 
-          if (Test-Path $filename -PathType Leaf) {
-            $size = (Get-Item $filename).Length / 1MB
-            Write-Host "✅ 文件2下载成功，大小：$($size.ToString('0.00')) MB"
-            echo "FILE2_NAME=$filename" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "❌ 文件2下载失败！"
+          if exist "%filename%" (
+            for %%f in ("%filename%") do set "filesize=%%~zf"
+            if !filesize! gtr 0 (
+              echo ✅ 文件2下载成功，大小：!filesize! 字节
+              echo FILE2_NAME=%filename% >> %GITHUB_ENV%
+            ) else (
+              echo ❌ 文件2下载失败：文件为空！
+              exit 1
+            )
+          ) else (
+            echo ❌ 文件2下载失败：文件不存在！
             exit 1
-          }
+          )
 
       - name: 上传文件2到Misc Releases
         uses: softprops/action-gh-release@v1
@@ -89,27 +105,34 @@ jobs:
 
       # 第3个文件：dotNetFx48_20250909_x86.WA
       - name: 下载文件3 - dotNetFx48_20250909_x86.WA
-        shell: pwsh
+        shell: cmd
         id: download_3
         run: |
-          $filename = "dotNetFx48_20250909_x86.WA"
-          $url = "https://github.com/abbodi1406/dotNetFx4xW7A/releases/download/25.09.09/dotNetFx48_20250909_x86.WA"
+          @echo off
+          set "filename=dotNetFx48_20250909_x86.WA"
+          set "url=https://github.com/abbodi1406/dotNetFx4xW7A/releases/download/25.09.09/dotNetFx48_20250909_x86.WA"
           
-          Write-Host "=== 开始下载文件3：$filename ==="
-          Invoke-WebRequest -Uri $url -OutFile $filename `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-            -MaximumRetryCount 10 `
-            -RetryIntervalSec 15 `
-            -TimeoutSec 3600
+          echo === 开始下载文件3：%filename% ===
+          curl.exe -L -o "%filename%" ^
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ^
+            --retry 10 ^
+            --retry-delay 15 ^
+            --max-time 3600 ^
+            "%url%"
 
-          if (Test-Path $filename -PathType Leaf) {
-            $size = (Get-Item $filename).Length / 1MB
-            Write-Host "✅ 文件3下载成功，大小：$($size.ToString('0.00')) MB"
-            echo "FILE3_NAME=$filename" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "❌ 文件3下载失败！"
+          if exist "%filename%" (
+            for %%f in ("%filename%") do set "filesize=%%~zf"
+            if !filesize! gtr 0 (
+              echo ✅ 文件3下载成功，大小：!filesize! 字节
+              echo FILE3_NAME=%filename% >> %GITHUB_ENV%
+            ) else (
+              echo ❌ 文件3下载失败：文件为空！
+              exit 1
+            )
+          ) else (
+            echo ❌ 文件3下载失败：文件不存在！
             exit 1
-          }
+          )
 
       - name: 上传文件3到Misc Releases
         uses: softprops/action-gh-release@v1
@@ -123,31 +146,37 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_RELEASE_UPLOAD_CONCURRENCY: 1
 
-      # 第4个文件：vcredist_x64_Win7_20250708.WA（修正参数）
+      # 第4个文件：vcredist_x64_Win7_20250708.WA（彻底重构，无PowerShell参数）
       - name: 下载文件4 - vcredist_x64_Win7_20250708.WA
-        shell: pwsh
+        shell: cmd
         id: download_4
         run: |
-          $filename = "vcredist_x64_Win7_20250708.WA"
-          $url = "https://gitlab.com/-/project/11037551/uploads/8899c68cf5b5bfc7da7f04b73afa9f58/vcredist_x64_Win7_20250708.WA"
+          @echo off
+          set "filename=vcredist_x64_Win7_20250708.WA"
+          set "url=https://gitlab.com/-/project/11037551/uploads/8899c68cf5b5bfc7da7f04b73afa9f58/vcredist_x64_Win7_20250708.WA"
           
-          Write-Host "=== 开始下载文件4：$filename ==="
-          # 核心修正：-AllowRedirection → -AllowRedirect
-          Invoke-WebRequest -Uri $url -OutFile $filename `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-            -MaximumRetryCount 10 `
-            -RetryIntervalSec 15 `
-            -TimeoutSec 3600 `
-            -AllowRedirect  # 正确参数
+          echo === 开始下载文件4：%filename% ===
+          :: curl自带-L参数处理重定向，无需额外PowerShell参数，彻底规避兼容问题
+          curl.exe -L -o "%filename%" ^
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ^
+            --retry 10 ^
+            --retry-delay 15 ^
+            --max-time 3600 ^
+            "%url%"
 
-          if (Test-Path $filename -PathType Leaf) {
-            $size = (Get-Item $filename).Length / 1MB
-            Write-Host "✅ 文件4下载成功，大小：$($size.ToString('0.00')) MB"
-            echo "FILE4_NAME=$filename" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "❌ 文件4下载失败！"
+          if exist "%filename%" (
+            for %%f in ("%filename%") do set "filesize=%%~zf"
+            if !filesize! gtr 0 (
+              echo ✅ 文件4下载成功，大小：!filesize! 字节
+              echo FILE4_NAME=%filename% >> %GITHUB_ENV%
+            ) else (
+              echo ❌ 文件4下载失败：文件为空！
+              exit 1
+            )
+          ) else (
+            echo ❌ 文件4下载失败：文件不存在！
             exit 1
-          }
+          )
 
       - name: 上传文件4到Misc Releases
         uses: softprops/action-gh-release@v1
@@ -161,30 +190,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_RELEASE_UPLOAD_CONCURRENCY: 1
 
-      # 第5个文件：vcredist_x86_Win7_20250708_r.WA（修正参数）
+      # 第5个文件：vcredist_x86_Win7_20250708_r.WA
       - name: 下载文件5 - vcredist_x86_Win7_20250708_r.WA
-        shell: pwsh
+        shell: cmd
         id: download_5
         run: |
-          $filename = "vcredist_x86_Win7_20250708_r.WA"
-          $url = "https://gitlab.com/-/project/11037551/uploads/49d56348397669befad302f58070ab2f/vcredist_x86_Win7_20250708_r.WA"
+          @echo off
+          set "filename=vcredist_x86_Win7_20250708_r.WA"
+          set "url=https://gitlab.com/-/project/11037551/uploads/49d56348397669befad302f58070ab2f/vcredist_x86_Win7_20250708_r.WA"
           
-          Write-Host "=== 开始下载文件5：$filename ==="
-          Invoke-WebRequest -Uri $url -OutFile $filename `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-            -MaximumRetryCount 10 `
-            -RetryIntervalSec 15 `
-            -TimeoutSec 3600 `
-            -AllowRedirect  # 正确参数
+          echo === 开始下载文件5：%filename% ===
+          curl.exe -L -o "%filename%" ^
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ^
+            --retry 10 ^
+            --retry-delay 15 ^
+            --max-time 3600 ^
+            "%url%"
 
-          if (Test-Path $filename -PathType Leaf) {
-            $size = (Get-Item $filename).Length / 1MB
-            Write-Host "✅ 文件5下载成功，大小：$($size.ToString('0.00')) MB"
-            echo "FILE5_NAME=$filename" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "❌ 文件5下载失败！"
+          if exist "%filename%" (
+            for %%f in ("%filename%") do set "filesize=%%~zf"
+            if !filesize! gtr 0 (
+              echo ✅ 文件5下载成功，大小：!filesize! 字节
+              echo FILE5_NAME=%filename% >> %GITHUB_ENV%
+            ) else (
+              echo ❌ 文件5下载失败：文件为空！
+              exit 1
+            )
+          ) else (
+            echo ❌ 文件5下载失败：文件不存在！
             exit 1
-          }
+          )
 
       - name: 上传文件5到Misc Releases
         uses: softprops/action-gh-release@v1
@@ -198,30 +233,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_RELEASE_UPLOAD_CONCURRENCY: 1
 
-      # 第6个文件：vcredist_x64_2022_WinAll_14.44.35211.WA（修正参数）
+      # 第6个文件：vcredist_x64_2022_WinAll_14.44.35211.WA
       - name: 下载文件6 - vcredist_x64_2022_WinAll_14.44.35211.WA
-        shell: pwsh
+        shell: cmd
         id: download_6
         run: |
-          $filename = "vcredist_x64_2022_WinAll_14.44.35211.WA"
-          $url = "https://gitlab.com/-/project/11037551/uploads/ce26d073600eb68db902bc12946d42e7/vcredist_x64_2022_WinAll_14.44.35211.WA"
+          @echo off
+          set "filename=vcredist_x64_2022_WinAll_14.44.35211.WA"
+          set "url=https://gitlab.com/-/project/11037551/uploads/ce26d073600eb68db902bc12946d42e7/vcredist_x64_2022_WinAll_14.44.35211.WA"
           
-          Write-Host "=== 开始下载文件6：$filename ==="
-          Invoke-WebRequest -Uri $url -OutFile $filename `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-            -MaximumRetryCount 10 `
-            -RetryIntervalSec 15 `
-            -TimeoutSec 3600 `
-            -AllowRedirect  # 正确参数
+          echo === 开始下载文件6：%filename% ===
+          curl.exe -L -o "%filename%" ^
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ^
+            --retry 10 ^
+            --retry-delay 15 ^
+            --max-time 3600 ^
+            "%url%"
 
-          if (Test-Path $filename -PathType Leaf) {
-            $size = (Get-Item $filename).Length / 1MB
-            Write-Host "✅ 文件6下载成功，大小：$($size.ToString('0.00')) MB"
-            echo "FILE6_NAME=$filename" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "❌ 文件6下载失败！"
+          if exist "%filename%" (
+            for %%f in ("%filename%") do set "filesize=%%~zf"
+            if !filesize! gtr 0 (
+              echo ✅ 文件6下载成功，大小：!filesize! 字节
+              echo FILE6_NAME=%filename% >> %GITHUB_ENV%
+            ) else (
+              echo ❌ 文件6下载失败：文件为空！
+              exit 1
+            )
+          ) else (
+            echo ❌ 文件6下载失败：文件不存在！
             exit 1
-          }
+          )
 
       - name: 上传文件6到Misc Releases
         uses: softprops/action-gh-release@v1
@@ -235,30 +276,36 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_RELEASE_UPLOAD_CONCURRENCY: 1
 
-      # 第7个文件：vcredist_x86_2022_WinAll_14.44.35211_r.WA（修正参数）
+      # 第7个文件：vcredist_x86_2022_WinAll_14.44.35211_r.WA
       - name: 下载文件7 - vcredist_x86_2022_WinAll_14.44.35211_r.WA
-        shell: pwsh
+        shell: cmd
         id: download_7
         run: |
-          $filename = "vcredist_x86_2022_WinAll_14.44.35211_r.WA"
-          $url = "https://gitlab.com/-/project/11037551/uploads/16a7925f42634ef7232d7d9cc122034a/vcredist_x86_2022_WinAll_14.44.35211_r.WA"
+          @echo off
+          set "filename=vcredist_x86_2022_WinAll_14.44.35211_r.WA"
+          set "url=https://gitlab.com/-/project/11037551/uploads/16a7925f42634ef7232d7d9cc122034a/vcredist_x86_2022_WinAll_14.44.35211_r.WA"
           
-          Write-Host "=== 开始下载文件7：$filename ==="
-          Invoke-WebRequest -Uri $url -OutFile $filename `
-            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-            -MaximumRetryCount 10 `
-            -RetryIntervalSec 15 `
-            -TimeoutSec 3600 `
-            -AllowRedirect  # 正确参数
+          echo === 开始下载文件7：%filename% ===
+          curl.exe -L -o "%filename%" ^
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" ^
+            --retry 10 ^
+            --retry-delay 15 ^
+            --max-time 3600 ^
+            "%url%"
 
-          if (Test-Path $filename -PathType Leaf) {
-            $size = (Get-Item $filename).Length / 1MB
-            Write-Host "✅ 文件7下载成功，大小：$($size.ToString('0.00')) MB"
-            echo "FILE7_NAME=$filename" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "❌ 文件7下载失败！"
+          if exist "%filename%" (
+            for %%f in ("%filename%") do set "filesize=%%~zf"
+            if !filesize! gtr 0 (
+              echo ✅ 文件7下载成功，大小：!filesize! 字节
+              echo FILE7_NAME=%filename% >> %GITHUB_ENV%
+            ) else (
+              echo ❌ 文件7下载失败：文件为空！
+              exit 1
+            )
+          ) else (
+            echo ❌ 文件7下载失败：文件不存在！
             exit 1
-          }
+          )
 
       - name: 上传文件7到Misc Releases
         uses: softprops/action-gh-release@v1
@@ -274,8 +321,9 @@ jobs:
 
       # 步骤2：全流程完成确认
       - name: 所有文件处理完成
-        shell: pwsh
+        shell: cmd
         run: |
-          Write-Host "🎉 所有7个文件已完成「下载→上传」全流程！"
-          Write-Host "=== 最终文件列表 ==="
-          Get-ChildItem *.exe, *.WA | Format-Table Name, Length
+          @echo off
+          echo 🎉 所有7个文件已完成「下载→上传」全流程！
+          echo === 最终文件列表 ===
+          dir *.exe *.WA

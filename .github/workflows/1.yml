@@ -1,125 +1,284 @@
-name: 分批次上传Win7文件到Releases（稳定版）
+name: 逐个下载上传Win7工具到Misc Releases
 
 on:
   workflow_dispatch:  # 手动触发
 
 jobs:
-  download-and-upload:
-    runs-on: windows-latest  # 换更稳定的Windows Runner
-    timeout-minutes: 120     # 延长总超时到2小时
+  download-upload-one-by-one:
+    runs-on: windows-latest  # 稳定的Windows Runner，适配大文件/多链接
+    timeout-minutes: 180     # 延长超时到3小时，足够处理7个文件
     steps:
-      # 步骤1：检出仓库
+      # 步骤1：检出仓库（上传Releases必需）
       - name: 检出代码仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 步骤2：下载所有文件（修正链接+保留完整原名）
-      - name: 下载所有Win7相关文件
-        shell: pwsh  # Windows用PowerShell更稳定
+      # ===================== 逐个处理文件（下载1个→上传1个） =====================
+      # 第1个文件：UpdatePack7R2-26.1.15.exe
+      - name: 下载文件1 - UpdatePack7R2-26.1.15.exe
+        shell: pwsh
+        id: download_1
         run: |
-          # 定义修正后的8个下载链接
-          $files = @{
-            "install_Windows7x86ULTIMATE.7z.001" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ULTIMATE.7z.001"
-            "install_Windows7x86ULTIMATE.7z.002" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ULTIMATE.7z.002"
-            "install_Windows7x64ULTIMATE.7z.001" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.001"
-            "install_Windows7x64ULTIMATE.7z.002" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.002"
-            "install_Windows7x86ENTERPRISE.7z.001" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.001"
-            "install_Windows7x86ENTERPRISE.7z.002" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.002"
-            "install_Windows7x64ENTERPRISE.7z.001" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.001"
-            "install_Windows7x64ENTERPRISE.7z.002" = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.002"
+          $filename = "UpdatePack7R2-26.1.15.exe"
+          $url = "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/UpdatePack7R2/UpdatePack7R2-26.1.15.exe"
+          
+          Write-Host "=== 开始下载文件1：$filename ==="
+          # Windows稳定下载（适配GitHub/GitLab链接，加重试）
+          Invoke-WebRequest -Uri $url -OutFile $filename `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
+            -MaximumRetryCount 10 `
+            -RetryIntervalSec 15 `
+            -TimeoutSec 3600
+
+          # 严格校验文件（存在+非空）
+          if (Test-Path $filename -PathType Leaf) {
+            $size = (Get-Item $filename).Length / 1MB
+            Write-Host "✅ 文件1下载成功，大小：$($size.ToString('0.00')) MB"
+            # 输出文件名到环境变量，供上传步骤使用
+            echo "FILE1_NAME=$filename" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 文件1下载失败！"
+            exit 1
           }
 
-          # 遍历下载（Windows PowerShell语法）
-          foreach ($filename in $files.Keys) {
-            $url = $files[$filename]
-            Write-Host "=== 开始下载：$filename ==="
-            
-            # Windows用Invoke-WebRequest下载（比curl更稳定）
-            Invoke-WebRequest -Uri $url -OutFile $filename `
-              -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
-              -MaximumRetryCount 8 `
-              -RetryIntervalSec 10
+      - name: 上传文件1到Misc Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: Misc
+          overwrite: true  # 覆盖已存在的同名文件
+          files: ${{ env.FILE1_NAME }}  # 仅上传当前文件
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_RELEASE_UPLOAD_CONCURRENCY: 1  # 强制串行上传
 
-            # 校验文件
-            if (Test-Path $filename -PathType Leaf) {
-              $size = (Get-Item $filename).Length / 1GB
-              Write-Host "✅ $filename 下载成功，大小：$($size.ToString('0.00')) GB"
-            } else {
-              Write-Error "❌ $filename 下载失败！"
-              exit 1
-            }
+      # 第2个文件：dotNetFx48_20251014_x64.WA
+      - name: 下载文件2 - dotNetFx48_20251014_x64.WA
+        shell: pwsh
+        id: download_2
+        run: |
+          $filename = "dotNetFx48_20251014_x64.WA"
+          $url = "https://github.com/abbodi1406/dotNetFx4xW7A/releases/download/25.10.14/dotNetFx48_20251014_x64.WA"
+          
+          Write-Host "=== 开始下载文件2：$filename ==="
+          Invoke-WebRequest -Uri $url -OutFile $filename `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
+            -MaximumRetryCount 10 `
+            -RetryIntervalSec 15 `
+            -TimeoutSec 3600
+
+          if (Test-Path $filename -PathType Leaf) {
+            $size = (Get-Item $filename).Length / 1MB
+            Write-Host "✅ 文件2下载成功，大小：$($size.ToString('0.00')) MB"
+            echo "FILE2_NAME=$filename" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 文件2下载失败！"
+            exit 1
           }
 
-          # 打印文件列表确认
-          Write-Host "=== 下载完成，当前目录文件 ==="
-          Get-ChildItem *.7z.*
-
-      # 步骤3：分批次上传（核心修复：避免并行上传过多）
-      # 批次1：x86旗舰版
-      - name: 上传批次1（x86旗舰版）
+      - name: 上传文件2到Misc Releases
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: Win7_SP1_Ult_Ent
+          tag_name: Misc
           overwrite: true
-          files: |
-            install_Windows7x86ULTIMATE.7z.001
-            install_Windows7x86ULTIMATE.7z.002
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_RELEASE_UPLOAD_CONCURRENCY: 1  # 限制并发数为1
-
-      # 批次2：x64旗舰版
-      - name: 上传批次2（x64旗舰版）
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: Win7_SP1_Ult_Ent
-          overwrite: true
-          files: |
-            install_Windows7x64ULTIMATE.7z.001
-            install_Windows7x64ULTIMATE.7z.002
+          files: ${{ env.FILE2_NAME }}
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_RELEASE_UPLOAD_CONCURRENCY: 1
 
-      # 批次3：x86企业版
-      - name: 上传批次3（x86企业版）
+      # 第3个文件：dotNetFx48_20250909_x86.WA
+      - name: 下载文件3 - dotNetFx48_20250909_x86.WA
+        shell: pwsh
+        id: download_3
+        run: |
+          $filename = "dotNetFx48_20250909_x86.WA"
+          $url = "https://github.com/abbodi1406/dotNetFx4xW7A/releases/download/25.09.09/dotNetFx48_20250909_x86.WA"
+          
+          Write-Host "=== 开始下载文件3：$filename ==="
+          Invoke-WebRequest -Uri $url -OutFile $filename `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
+            -MaximumRetryCount 10 `
+            -RetryIntervalSec 15 `
+            -TimeoutSec 3600
+
+          if (Test-Path $filename -PathType Leaf) {
+            $size = (Get-Item $filename).Length / 1MB
+            Write-Host "✅ 文件3下载成功，大小：$($size.ToString('0.00')) MB"
+            echo "FILE3_NAME=$filename" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 文件3下载失败！"
+            exit 1
+          }
+
+      - name: 上传文件3到Misc Releases
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: Win7_SP1_Ult_Ent
+          tag_name: Misc
           overwrite: true
-          files: |
-            install_Windows7x86ENTERPRISE.7z.001
-            install_Windows7x86ENTERPRISE.7z.002
+          files: ${{ env.FILE3_NAME }}
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_RELEASE_UPLOAD_CONCURRENCY: 1
 
-      # 批次4：x64企业版
-      - name: 上传批次4（x64企业版）
+      # 第4个文件：vcredist_x64_Win7_20250708.WA（GitLab链接）
+      - name: 下载文件4 - vcredist_x64_Win7_20250708.WA
+        shell: pwsh
+        id: download_4
+        run: |
+          $filename = "vcredist_x64_Win7_20250708.WA"
+          $url = "https://gitlab.com/-/project/11037551/uploads/8899c68cf5b5bfc7da7f04b73afa9f58/vcredist_x64_Win7_20250708.WA"
+          
+          Write-Host "=== 开始下载文件4：$filename ==="
+          # GitLab链接需额外适配，禁用重定向限制
+          Invoke-WebRequest -Uri $url -OutFile $filename `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
+            -MaximumRetryCount 10 `
+            -RetryIntervalSec 15 `
+            -TimeoutSec 3600 `
+            -AllowRedirection
+
+          if (Test-Path $filename -PathType Leaf) {
+            $size = (Get-Item $filename).Length / 1MB
+            Write-Host "✅ 文件4下载成功，大小：$($size.ToString('0.00')) MB"
+            echo "FILE4_NAME=$filename" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 文件4下载失败！"
+            exit 1
+          }
+
+      - name: 上传文件4到Misc Releases
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: Win7_SP1_Ult_Ent
+          tag_name: Misc
           overwrite: true
-          files: |
-            install_Windows7x64ENTERPRISE.7z.001
-            install_Windows7x64ENTERPRISE.7z.002
+          files: ${{ env.FILE4_NAME }}
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_RELEASE_UPLOAD_CONCURRENCY: 1
 
-      # 步骤4：完成确认
-      - name: 全流程完成提示
+      # 第5个文件：vcredist_x86_Win7_20250708_r.WA（GitLab链接）
+      - name: 下载文件5 - vcredist_x86_Win7_20250708_r.WA
+        shell: pwsh
+        id: download_5
+        run: |
+          $filename = "vcredist_x86_Win7_20250708_r.WA"
+          $url = "https://gitlab.com/-/project/11037551/uploads/49d56348397669befad302f58070ab2f/vcredist_x86_Win7_20250708_r.WA"
+          
+          Write-Host "=== 开始下载文件5：$filename ==="
+          Invoke-WebRequest -Uri $url -OutFile $filename `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
+            -MaximumRetryCount 10 `
+            -RetryIntervalSec 15 `
+            -TimeoutSec 3600 `
+            -AllowRedirection
+
+          if (Test-Path $filename -PathType Leaf) {
+            $size = (Get-Item $filename).Length / 1MB
+            Write-Host "✅ 文件5下载成功，大小：$($size.ToString('0.00')) MB"
+            echo "FILE5_NAME=$filename" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 文件5下载失败！"
+            exit 1
+          }
+
+      - name: 上传文件5到Misc Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: Misc
+          overwrite: true
+          files: ${{ env.FILE5_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_RELEASE_UPLOAD_CONCURRENCY: 1
+
+      # 第6个文件：vcredist_x64_2022_WinAll_14.44.35211.WA（GitLab链接）
+      - name: 下载文件6 - vcredist_x64_2022_WinAll_14.44.35211.WA
+        shell: pwsh
+        id: download_6
+        run: |
+          $filename = "vcredist_x64_2022_WinAll_14.44.35211.WA"
+          $url = "https://gitlab.com/-/project/11037551/uploads/ce26d073600eb68db902bc12946d42e7/vcredist_x64_2022_WinAll_14.44.35211.WA"
+          
+          Write-Host "=== 开始下载文件6：$filename ==="
+          Invoke-WebRequest -Uri $url -OutFile $filename `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
+            -MaximumRetryCount 10 `
+            -RetryIntervalSec 15 `
+            -TimeoutSec 3600 `
+            -AllowRedirection
+
+          if (Test-Path $filename -PathType Leaf) {
+            $size = (Get-Item $filename).Length / 1MB
+            Write-Host "✅ 文件6下载成功，大小：$($size.ToString('0.00')) MB"
+            echo "FILE6_NAME=$filename" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 文件6下载失败！"
+            exit 1
+          }
+
+      - name: 上传文件6到Misc Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: Misc
+          overwrite: true
+          files: ${{ env.FILE6_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_RELEASE_UPLOAD_CONCURRENCY: 1
+
+      # 第7个文件：vcredist_x86_2022_WinAll_14.44.35211_r.WA（GitLab链接）
+      - name: 下载文件7 - vcredist_x86_2022_WinAll_14.44.35211_r.WA
+        shell: pwsh
+        id: download_7
+        run: |
+          $filename = "vcredist_x86_2022_WinAll_14.44.35211_r.WA"
+          $url = "https://gitlab.com/-/project/11037551/uploads/16a7925f42634ef7232d7d9cc122034a/vcredist_x86_2022_WinAll_14.44.35211_r.WA"
+          
+          Write-Host "=== 开始下载文件7：$filename ==="
+          Invoke-WebRequest -Uri $url -OutFile $filename `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" `
+            -MaximumRetryCount 10 `
+            -RetryIntervalSec 15 `
+            -TimeoutSec 3600 `
+            -AllowRedirection
+
+          if (Test-Path $filename -PathType Leaf) {
+            $size = (Get-Item $filename).Length / 1MB
+            Write-Host "✅ 文件7下载成功，大小：$($size.ToString('0.00')) MB"
+            echo "FILE7_NAME=$filename" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "❌ 文件7下载失败！"
+            exit 1
+          }
+
+      - name: 上传文件7到Misc Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: Misc
+          overwrite: true
+          files: ${{ env.FILE7_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_RELEASE_UPLOAD_CONCURRENCY: 1
+
+      # 步骤2：全流程完成确认
+      - name: 所有文件处理完成
         shell: pwsh
         run: |
-          Write-Host "✅ 所有文件已分批次上传完成！"
+          Write-Host "🎉 所有7个文件已完成「下载→上传」全流程！"
           Write-Host "=== 最终文件列表 ==="
-          Get-ChildItem *.7z.*
+          Get-ChildItem *.exe, *.WA | Format-Table Name, Length

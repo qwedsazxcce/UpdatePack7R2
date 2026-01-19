@@ -1,4 +1,4 @@
-name: 下载Win7文件并直接上传到Releases
+name: 下载Win7文件并指定完整名上传到Releases
 
 on:
   workflow_dispatch:  # 手动触发
@@ -6,44 +6,43 @@ on:
 jobs:
   download-and-upload:
     runs-on: ubuntu-latest
-    timeout-minutes: 60  # 足够处理8个文件的下载+上传
+    timeout-minutes: 60
     steps:
-      # 步骤1：检出仓库（上传Releases必需）
+      # 步骤1：检出仓库（上传必需）
       - name: 检出代码仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 步骤2：批量下载所有文件（保留原名，加重试+校验）
-      - name: 下载所有Win7相关文件
+      # 步骤2：下载所有文件（修正链接+保留完整原名）
+      - name: 下载所有Win7相关文件（修正链接）
         run: |
-          # 定义所有需要下载的链接（8个）
-          DOWNLOAD_URLS=(
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ULTIMATE.7z.001"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ULTIMATE.7z.002"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.001"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.002"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.001"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.002"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.001"
-            "https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.002"
+          # 定义修正后的8个下载链接（重点：x64企业版路径改为Windows7x64）
+          declare -A FILES=(
+            ["install_Windows7x86ULTIMATE.7z.001"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ULTIMATE.7z.001"
+            ["install_Windows7x86ULTIMATE.7z.002"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ULTIMATE.7z.002"
+            ["install_Windows7x64ULTIMATE.7z.001"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.001"
+            ["install_Windows7x64ULTIMATE.7z.002"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ULTIMATE.7z.002"
+            ["install_Windows7x86ENTERPRISE.7z.001"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.001"
+            ["install_Windows7x86ENTERPRISE.7z.002"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x86/install_Windows7x86ENTERPRISE.7z.002"
+            ["install_Windows7x64ENTERPRISE.7z.001"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.001"
+            ["install_Windows7x64ENTERPRISE.7z.002"]="https://github.com/yuanpeirong/UpdatePack7R2/releases/download/Windows7x64/install_Windows7x64ENTERPRISE.7z.002"
           )
 
-          # 遍历链接逐个下载
-          for url in "${DOWNLOAD_URLS[@]}"; do
-            # 提取原始文件名（如install_Windows7x86ULTIMATE.7z.001）
-            filename=$(basename "$url")
+          # 遍历下载（文件名+链接一一对应）
+          for filename in "${!FILES[@]}"; do
+            url="${FILES[$filename]}"
             echo "=== 开始下载：$filename ==="
-
-            # 稳定下载配置：重试8次+10秒延迟+5分钟超时+浏览器请求头
-            curl -L -o "$filename" \
+            
+            # 带详细日志的下载命令
+            curl -v -L -o "$filename" \
               --retry 8 \
               --retry-delay 10 \
               --max-time 300 \
               --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
               "$url"
 
-            # 校验文件：存在且非空（避免下载空文件）
+            # 严格校验文件
             if [ -f "$filename" ] && [ -s "$filename" ]; then
               echo "✅ $filename 下载成功，大小：$(du -h "$filename" | awk '{print $1}')"
             else
@@ -52,23 +51,34 @@ jobs:
             fi
           done
 
-      # 步骤3：直接上传所有文件到Win7_SP1_Ult_Ent Releases
-      - name: 上传文件到目标Releases
+          # 关键：打印当前目录所有文件，确认下载成功（调试用）
+          echo "=== 下载完成后，当前目录文件列表 ==="
+          ls -l
+
+      # 步骤3：上传（直接指定所有完整文件名，无通配符）
+      - name: 上传文件到Win7_SP1_Ult_Ent Releases
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: Win7_SP1_Ult_Ent  # 严格匹配你的项目标签
-          overwrite: true  # 覆盖已存在的同名文件（避免重复上传报错）
+          tag_name: Win7_SP1_Ult_Ent
+          overwrite: true
+          # 逐个列出所有完整文件名，无注释、无通配符
           files: |
-            *.7z.001  # 匹配所有.7z.001后缀文件
-            *.7z.002  # 匹配所有.7z.002后缀文件
-          draft: false  # 直接发布，非草稿
-          prerelease: false  # 非预发布版本
+            install_Windows7x86ULTIMATE.7z.001
+            install_Windows7x86ULTIMATE.7z.002
+            install_Windows7x64ULTIMATE.7z.001
+            install_Windows7x64ULTIMATE.7z.002
+            install_Windows7x86ENTERPRISE.7z.001
+            install_Windows7x86ENTERPRISE.7z.002
+            install_Windows7x64ENTERPRISE.7z.001
+            install_Windows7x64ENTERPRISE.7z.002
+          draft: false
+          prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub自动提供的令牌，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 步骤4：执行完成确认
+      # 步骤4：完成确认
       - name: 全流程完成提示
         run: |
-          echo "✅ 所有文件已成功下载并上传到Win7_SP1_Ult_Ent Releases！"
-          echo "=== 已上传的文件列表 ==="
-          ls -l *.7z.001 *.7z.002
+          echo "✅ 所有文件已成功上传！"
+          echo "=== 最终上传文件列表 ==="
+          ls -l *.7z.*

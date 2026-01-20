@@ -1,4 +1,4 @@
-name: Windows7x86ENTERPRISE
+name: Windows7x86ENTERPRISE_fix
 
 on: workflow_dispatch
 #on: [push, pull_request]

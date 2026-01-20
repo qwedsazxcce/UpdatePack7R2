@@ -1,5 +1,3 @@
-# GitHub Actions工作流：Windows7 WIM转ESD并上传Releases
-# 语法规范：所有缩进为2个空格，字段名小写，冒号后加空格，无Tab字符
 name: Windows7_WIM2ESD
 on:
   workflow_dispatch:  # 仅手动触发，避免误执行

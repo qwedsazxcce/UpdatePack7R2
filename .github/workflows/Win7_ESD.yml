@@ -300,15 +300,24 @@ jobs:
           7z a -t7z -mx9 -v1950M WIN7.7z WIN7.esd
           Write-Host "分卷压缩完成，生成文件：$(Get-ChildItem WIN7.7z.* | Select-Object -ExpandProperty Name)"
 
-      # -------------------------- 第七步：上传到Releases --------------------------
+      # -------------------------- 第七步：上传到Releases（核心修改：重试次数改为10次） --------------------------
       - name: 上传分卷到Releases
         uses: softprops/action-gh-release@v2
         with:
+          # Releases标签（唯一标识）
           tag_name: Windows7_ULT&ENT_32&64_$(Get-Date -Format "yyyyMMddHHmm")
+          # Releases标题
           name: Windows7_ULT&ENT_32&64
+          # 上传的文件（所有分卷）
           files: ./win7-build/WIN7.7z.*
+          # 是否为预发布（可选）
           prerelease: false
+          # 核心修改1：上传重试次数改为10次
+          retries: 10
+          # 核心修改2：重试间隔改为5秒（避免高频重试触发限流）
+          retry_delay: 5000
         env:
+          # GitHub Token（默认GITHUB_TOKEN有写权限）
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 清理临时文件

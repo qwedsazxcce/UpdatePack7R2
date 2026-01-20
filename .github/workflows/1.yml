@@ -21,7 +21,7 @@ jobs:
         run: |
           # 下载指定ISO，保持原文件名不变
           wget -O "cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso" \
-          "https://drive.massgrave.dev/cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso"
+          "https://archive.isdn.network/windows/cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso"
 
       - name: 7-Zip 分卷压缩 (1950M/卷)
         run: |

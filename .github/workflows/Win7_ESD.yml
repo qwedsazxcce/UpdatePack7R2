@@ -1,4 +1,6 @@
 name: Windows7
+# 工作流名称
+name: Build Windows7 ULT&ENT 32&64 ESD
 
 # 触发方式：手动触发
 on:
@@ -32,25 +34,22 @@ jobs:
       - name: Download Windows7x86ULTIMATE 7z分卷
         run: |
           Set-Location ./win7-build
-          # 定义下载链接列表
           $urls = @(
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001",
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002",
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003"
           )
           
-          # 手动实现重试逻辑（原生PowerShell支持）
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
             $retryCount = 0
             $maxRetries = 3
-            $retryDelay = 5 # 重试间隔（秒）
+            $retryDelay = 5
             $success = $false
             
             while ($retryCount -lt $maxRetries -and -not $success) {
               try {
                 Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
-                # 原生Invoke-WebRequest，移除不兼容参数
                 Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
                 $success = $true
                 Write-Host "$filename 下载成功"
@@ -94,7 +93,6 @@ jobs:
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002"
           )
           
-          # 手动重试逻辑
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
             $retryCount = 0
@@ -149,7 +147,6 @@ jobs:
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003"
           )
           
-          # 手动重试逻辑
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
             $retryCount = 0
@@ -204,7 +201,6 @@ jobs:
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003"
           )
           
-          # 手动重试逻辑
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
             $retryCount = 0
@@ -222,6 +218,7 @@ jobs:
               catch {
                 $retryCount++
                 Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
+                Start-Sleep -Seconds $retryDelay
               }
             }
             
@@ -248,19 +245,51 @@ jobs:
           Remove-Item -Path install_Windows7x64ENTERPRISE.wim -Force
           Write-Host "x64 ENT处理完成，已追加到WIN7.wim"
 
-      # -------------------------- 第五步：WIM转ESD --------------------------
-      - name: 转换WIN7.wim为WIN7.esd（Recovery压缩）
+      # -------------------------- 第五步：WIM转ESD（修复核心逻辑） --------------------------
+      - name: 查看WIN7.wim的镜像索引（调试）
         run: |
           Set-Location ./win7-build
+          # 列出WIM中的所有镜像索引，确认数量
+          dism /Get-WimInfo /WimFile:WIN7.wim
+          # 获取索引数量（用于循环）
+          $wimInfo = dism /Get-WimInfo /WimFile:WIN7.wim | Select-String -Pattern "Index\s+:\s+(\d+)"
+          $indexes = $wimInfo.Matches | ForEach-Object { $_.Groups[1].Value }
+          Write-Host "WIN7.wim包含的镜像索引：$($indexes -join ', ')"
+          # 将索引保存到环境变量，供后续步骤使用
+          echo "WIM_INDEXES=$($indexes -join ',')" >> $env:GITHUB_ENV
+
+      - name: 转换WIN7.wim为WIN7.esd（支持多索引）
+        run: |
+          Set-Location ./win7-build
+          $indexes = $env:WIM_INDEXES -split ','
+          
+          # 第一步：导出第一个索引作为ESD的基础（Recovery压缩=ESD格式）
+          Write-Host "导出索引1到WIN7.esd（ESD格式）"
           dism /export-image `
             /SourceImageFile:WIN7.wim `
             /SourceIndex:1 `
             /DestinationImageFile:WIN7.esd `
             /Compress:recovery `
-            /CheckIntegrity `
-            /Format:ESD
+            /CheckIntegrity
+          
+          # 第二步：追加剩余索引到ESD文件
+          if ($indexes.Count -gt 1) {
+            foreach ($index in $indexes | Where-Object { $_ -ne 1 }) {
+              Write-Host "追加索引$index到WIN7.esd"
+              dism /export-image `
+                /SourceImageFile:WIN7.wim `
+                /SourceIndex:$index `
+                /DestinationImageFile:WIN7.esd `
+                /Compress:recovery `
+                /CheckIntegrity
+            }
+          }
+          
+          # 验证ESD文件是否生成
           if (Test-Path ./WIN7.esd) {
             Write-Host "ESD转换完成，文件大小：$([math]::Round((Get-Item ./WIN7.esd).Length / 1GB, 2)) GB"
+            # 验证ESD中的索引
+            dism /Get-WimInfo /WimFile:WIN7.esd
           } else {
             throw "ESD转换失败，未找到WIN7.esd文件"
           }

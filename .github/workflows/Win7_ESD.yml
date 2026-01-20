@@ -1,6 +1,6 @@
 name: Windows7
 
-# 触发方式：手动触发（推荐），也可添加push/定时触发
+# 触发方式：手动触发
 on:
   workflow_dispatch:
 
@@ -11,18 +11,17 @@ permissions:
 # 作业定义
 jobs:
   build-win7-esd:
-    # 使用Windows最新版Runner（必须，DISM是Windows自带工具）
     runs-on: windows-latest
     defaults:
       run:
         shell: pwsh # 使用PowerShell Core执行命令
 
     steps:
-      # 步骤1：检出仓库（为了后续上传Releases时关联仓库）
+      # 步骤1：检出仓库
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 步骤2：创建工作目录（避免文件混乱）
+      # 步骤2：创建工作目录
       - name: Create Working Directory
         run: |
           New-Item -Path ./win7-build -ItemType Directory -Force
@@ -39,31 +38,50 @@ jobs:
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002",
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003"
           )
-          # 批量下载（带重试）
+          
+          # 手动实现重试逻辑（原生PowerShell支持）
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
-            Write-Host "正在下载：$filename"
-            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+            $retryCount = 0
+            $maxRetries = 3
+            $retryDelay = 5 # 重试间隔（秒）
+            $success = $false
+            
+            while ($retryCount -lt $maxRetries -and -not $success) {
+              try {
+                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
+                # 原生Invoke-WebRequest，移除不兼容参数
+                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
+                $success = $true
+                Write-Host "$filename 下载成功"
+              }
+              catch {
+                $retryCount++
+                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
+                Start-Sleep -Seconds $retryDelay
+              }
+            }
+            
+            if (-not $success) {
+              throw "$filename 多次下载失败，终止工作流"
+            }
           }
 
       - name: 解压Windows7x86ULTIMATE 7z分卷
         run: |
           Set-Location ./win7-build
-          # 7z解压分卷（只需解压第一个分卷，自动识别后续）
           7z x -y install_Windows7x86ULTIMATE-26.1.15.7z.001
           Write-Host "解压完成，当前文件：$(Get-ChildItem)"
 
       - name: 提取x86 ULT第5个镜像到WIN7.wim
         run: |
           Set-Location ./win7-build
-          # DISM提取镜像（首次创建WIN7.wim）
           dism /export-image `
             /SourceImageFile:install_Windows7x86ULTIMATE.wim `
             /SourceIndex:5 `
             /DestinationImageFile:WIN7.wim `
             /Compress:max `
             /CheckIntegrity
-          # 删除原WIM文件
           Remove-Item -Path install_Windows7x86ULTIMATE.wim -Force
           Write-Host "x86 ULT处理完成，WIN7.wim已创建"
 
@@ -75,10 +93,32 @@ jobs:
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001",
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002"
           )
+          
+          # 手动重试逻辑
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
-            Write-Host "正在下载：$filename"
-            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+            $retryCount = 0
+            $maxRetries = 3
+            $retryDelay = 5
+            $success = $false
+            
+            while ($retryCount -lt $maxRetries -and -not $success) {
+              try {
+                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
+                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
+                $success = $true
+                Write-Host "$filename 下载成功"
+              }
+              catch {
+                $retryCount++
+                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
+                Start-Sleep -Seconds $retryDelay
+              }
+            }
+            
+            if (-not $success) {
+              throw "$filename 多次下载失败，终止工作流"
+            }
           }
 
       - name: 解压Windows7x86ENTERPRISE 7z分卷
@@ -108,10 +148,32 @@ jobs:
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002",
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003"
           )
+          
+          # 手动重试逻辑
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
-            Write-Host "正在下载：$filename"
-            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+            $retryCount = 0
+            $maxRetries = 3
+            $retryDelay = 5
+            $success = $false
+            
+            while ($retryCount -lt $maxRetries -and -not $success) {
+              try {
+                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
+                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
+                $success = $true
+                Write-Host "$filename 下载成功"
+              }
+              catch {
+                $retryCount++
+                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
+                Start-Sleep -Seconds $retryDelay
+              }
+            }
+            
+            if (-not $success) {
+              throw "$filename 多次下载失败，终止工作流"
+            }
           }
 
       - name: 解压Windows7x64ULTIMATE 7z分卷
@@ -141,10 +203,31 @@ jobs:
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002",
             "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003"
           )
+          
+          # 手动重试逻辑
           foreach ($url in $urls) {
             $filename = $url.Split('/')[-1]
-            Write-Host "正在下载：$filename"
-            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+            $retryCount = 0
+            $maxRetries = 3
+            $retryDelay = 5
+            $success = $false
+            
+            while ($retryCount -lt $maxRetries -and -not $success) {
+              try {
+                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
+                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
+                $success = $true
+                Write-Host "$filename 下载成功"
+              }
+              catch {
+                $retryCount++
+                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
+              }
+            }
+            
+            if (-not $success) {
+              throw "$filename 多次下载失败，终止工作流"
+            }
           }
 
       - name: 解压Windows7x64ENTERPRISE 7z分卷
@@ -169,7 +252,6 @@ jobs:
       - name: 转换WIN7.wim为WIN7.esd（Recovery压缩）
         run: |
           Set-Location ./win7-build
-          # ESD使用recovery压缩（最高压缩比，符合微软ESD标准）
           dism /export-image `
             /SourceImageFile:WIN7.wim `
             /SourceIndex:1 `
@@ -177,9 +259,8 @@ jobs:
             /Compress:recovery `
             /CheckIntegrity `
             /Format:ESD
-          # 验证ESD文件
           if (Test-Path ./WIN7.esd) {
-            Write-Host "ESD转换完成，文件大小：$(Get-Item ./WIN7.esd).Length / 1GB) GB"
+            Write-Host "ESD转换完成，文件大小：$([math]::Round((Get-Item ./WIN7.esd).Length / 1GB, 2)) GB"
           } else {
             throw "ESD转换失败，未找到WIN7.esd文件"
           }
@@ -188,29 +269,23 @@ jobs:
       - name: 分卷压缩WIN7.esd（1950M/卷）
         run: |
           Set-Location ./win7-build
-          # 7z分卷压缩：-v1950M 指定分卷大小，-t7z 7z格式，-mx9 最高压缩
           7z a -t7z -mx9 -v1950M WIN7.7z WIN7.esd
-          Write-Host "分卷压缩完成，生成文件：$(Get-ChildItem WIN7.7z.*)"
+          Write-Host "分卷压缩完成，生成文件：$(Get-ChildItem WIN7.7z.* | Select-Object -ExpandProperty Name)"
 
       # -------------------------- 第七步：上传到Releases --------------------------
       - name: 上传分卷到Releases
         uses: softprops/action-gh-release@v2
         with:
-          # Releases标签（唯一标识）
           tag_name: Windows7_ULT&ENT_32&64_$(Get-Date -Format "yyyyMMddHHmm")
-          # Releases标题
           name: Windows7_ULT&ENT_32&64
-          # 上传的文件（所有分卷）
           files: ./win7-build/WIN7.7z.*
-          # 是否为预发布（可选）
           prerelease: false
         env:
-          # GitHub Token（默认GITHUB_TOKEN有写权限）
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 可选：清理工作目录（节省空间）
+      # 清理临时文件
       - name: 清理临时文件
-        if: always() # 无论前面步骤是否失败都执行
+        if: always()
         run: |
           Remove-Item -Path ./win7-build -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "临时文件清理完成"

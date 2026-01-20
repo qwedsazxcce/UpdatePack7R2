@@ -38,7 +38,7 @@ jobs:
         curl -L -o cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.001 https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/WindowsServer_2008R2_SP1/cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.001
         curl -L -o cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.002 https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/WindowsServer_2008R2_SP1/cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.002
         7z x cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.001
-        7z e cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso "sources\install.wim" -o.
+        7z e cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso "sources\install.wim"
         ls
 
     # 使用UpdatePack7R2.exe集成更新

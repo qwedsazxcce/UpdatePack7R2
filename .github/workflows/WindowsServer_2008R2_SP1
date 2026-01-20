@@ -1,0 +1,75 @@
+name: WindowsServer_2008R2_SP1ALL
+
+on: workflow_dispatch
+#on: [push, pull_request]
+
+env:
+  UpdatePack7R2_VERSION: '26.1.15'
+  FILE_NAME: install
+
+jobs:
+  Windows7x64ALL_UpdatePack7R2:
+    runs-on: windows-latest
+
+    steps:
+
+    # 下载工具和镜像
+    - name: Get Tools and Wim
+      shell: pwsh
+      run: |
+        #ls     #Directory: D:\a\UpdatePack7R2\UpdatePack7R2(即仓库目录)
+        #D:\a\UpdatePack7R2                                上级目录，这里当做根目录
+        
+        cd ..  #Directory: D:\a\UpdatePack7R2
+
+        # 下载UpdatePack7R2
+        curl -L -o UpdatePack7R2.exe https://github.com/yuanpeirong/UpdatePack7R2/releases/download/UpdatePack7R2/UpdatePack7R2-26.1.15.exe
+        curl -L -o DirectX_June2010_x86.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/DirectX_June2010_x86.WA
+        curl -L -o DirectX_June2010_x64.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/DirectX_June2010_x64.WA
+        curl -L -o dotNetFx48_20250909_x86.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/dotNetFx48_20250909_x86.WA
+        curl -L -o dotNetFx48_20251014_x64.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/dotNetFx48_20251014_x64.WA
+        curl -L -o vcredist_x86_Win7_20250708_r.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/vcredist_x86_Win7_20250708_r.WA
+        curl -L -o vcredist_x64_Win7_20250708.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/vcredist_x64_Win7_20250708.WA
+        curl -L -o vcredist_x86_2022_WinAll_14.44.35211_r.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/vcredist_x86_2022_WinAll_14.44.35211_r.WA
+        curl -L -o vcredist_x64_2022_WinAll_14.44.35211.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/vcredist_x64_2022_WinAll_14.44.35211.WA
+      
+
+        # 下载 WindowsServer_2008R2_SP1镜像
+        curl -L -o cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.001 https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/WindowsServer_2008R2_SP1/cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.001
+        curl -L -o cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.002 https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/WindowsServer_2008R2_SP1/cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.002
+        7z x cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso.7z.001
+        7z x cn_windows_server_2008_r2_with_sp1_vl_build_x64_dvd_617396.iso
+        ls
+
+    # 使用UpdatePack7R2.exe集成更新
+    - name: UpdatePack7R2 Wim
+      shell: cmd
+      run: |
+        D:\a\UpdatePack7R2\UpdatePack7R2.exe /ie11 /WimFile=D:\a\UpdatePack7R2\${{env.FILE_NAME}}.wim /Index=* /FixOff /NVMe /USB3 /Optimize
+
+    # 打包
+    - name: Package binaries
+      run: |
+        #ls     #Directory: D:\a\UpdatePack7R2\UpdatePack7R2(即仓库目录)
+        7z a -v1950M ${{env.FILE_NAME}}-${{env.UpdatePack7R2_VERSION}}.7z ../${{env.FILE_NAME}}.wim -mx=9
+        7z a UpdatePack7log.7z C:\WINDOWS\UpdatePack7.log
+
+    # 上传日志
+    - uses: actions/upload-artifact@v4
+      with:
+        name: UpdatePack7log
+        path: UpdatePack7log.7z
+
+    # 上传镜像
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{env.FILE_NAME}}-${{env.UpdatePack7R2_VERSION}}
+        path: ${{env.FILE_NAME}}-${{env.UpdatePack7R2_VERSION}}.7z.*
+
+    # 发布镜像
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{env.FILE_NAME}}-${{env.UpdatePack7R2_VERSION}}
+        release_name: ${{env.FILE_NAME}}-${{env.UpdatePack7R2_VERSION}}
+        files: ${{env.FILE_NAME}}-${{env.UpdatePack7R2_VERSION}}.7z.*

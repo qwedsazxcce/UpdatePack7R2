@@ -305,7 +305,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           # Releases标签（唯一标识）
-          tag_name: Windows7_ULT&ENT_32&64_$(Get-Date -Format "yyyyMMddHHmm")
+          tag_name: Windows7_ULT&ENT_32&64
           # Releases标题
           name: Windows7_ULT&ENT_32&64
           # 上传的文件（所有分卷）

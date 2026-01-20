@@ -1,0 +1,138 @@
+<#
+    Windows7 WIM/ESD 处理自动化脚本
+    前置条件：
+    1. 安装7-Zip（添加到系统环境变量，或修改脚本中7z路径）
+    2. 确保DISM可用（Windows 10/11需启用“部署映像服务和管理工具”功能）
+    3. 安装GitHub CLI（gh）并登录（用于上传Releases）
+    4. 脚本运行权限：管理员权限（DISM需要）
+#>
+
+# 1. 定义全局配置（核心路径，可根据需要修改）
+$workDir = "D:\Win7_Workflow"  # 工作目录，建议用绝对路径
+$7zPath = "7z.exe"  # 若7z未加环境变量，改为完整路径如 "C:\Program Files\7-Zip\7z.exe"
+$win7WimPath = Join-Path $workDir "WIN7.wim"
+$win7EsdPath = Join-Path $workDir "WIN7.esd"
+
+# 2. 初始化工作目录
+if (-not (Test-Path $workDir)) {
+    New-Item -Path $workDir -ItemType Directory -Force | Out-Null
+}
+Set-Location $workDir
+
+# 3. 定义下载+解压+DISM处理的通用函数（避免重复代码）
+function Process-Win7Package {
+    param(
+        [string[]]$DownloadUrls,  # 分卷下载链接
+        [string]$WimFileName,     # 解压后的WIM文件名（如install_Windows7x86ULTIMATE.wim）
+        [int]$ImageIndex,         # 要提取的镜像编号
+        [bool]$IsFirstPackage     # 是否是第一个包（决定是创建还是追加WIM）
+    )
+
+    # 步骤1：下载所有分卷
+    foreach ($url in $DownloadUrls) {
+        $fileName = $url.Split("/")[-1]
+        $savePath = Join-Path $workDir $fileName
+        
+        if (-not (Test-Path $savePath)) {
+            Write-Host "正在下载：$fileName"
+            Invoke-WebRequest -Uri $url -OutFile $savePath -UseBasicParsing
+        } else {
+            Write-Host "文件已存在，跳过下载：$fileName"
+        }
+    }
+
+    # 步骤2：解压分卷（只需解压第一个001文件，7z会自动识别后续分卷）
+    $firstArchive = $DownloadUrls[0].Split("/")[-1]
+    $archivePath = Join-Path $workDir $firstArchive
+    Write-Host "正在解压：$firstArchive"
+    & $7zPath x $archivePath -o"$workDir" -y | Out-Null
+
+    # 步骤3：DISM提取/追加镜像
+    $sourceWimPath = Join-Path $workDir $WimFileName
+    if (-not (Test-Path $sourceWimPath)) {
+        Write-Error "找不到WIM文件：$sourceWimPath"
+        exit 1
+    }
+
+    Write-Host "正在处理WIM：$WimFileName（提取第$ImageIndex个镜像）"
+    if ($IsFirstPackage) {
+        # 第一个包：创建新的WIN7.wim
+        dism /export-image /SourceImageFile:"$sourceWimPath" /SourceIndex:$ImageIndex /DestinationImageFile:"$win7WimPath" /Compress:max /CheckIntegrity
+    } else {
+        # 后续包：追加到已有的WIN7.wim
+        dism /append-image /ImageFile:"$win7WimPath" /SourceImageFile:"$sourceWimPath" /SourceIndex:$ImageIndex /Compress:max /CheckIntegrity
+    }
+
+    # 步骤4：删除原WIM文件
+    if (Test-Path $sourceWimPath) {
+        Remove-Item -Path $sourceWimPath -Force
+        Write-Host "已删除原WIM文件：$sourceWimPath"
+    }
+
+    # 步骤5：清理分卷压缩包（可选，若需要保留可注释）
+    foreach ($url in $DownloadUrls) {
+        $fileName = $url.Split("/")[-1]
+        $filePath = Join-Path $workDir $fileName
+        if (Test-Path $filePath) {
+            Remove-Item -Path $filePath -Force
+        }
+    }
+}
+
+# 4. 按顺序处理4个包（修复了文件名称错误）
+# 4.1 处理x86旗舰版（第一个包，创建WIN7.wim）
+$urlsX86Ultimate = @(
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001",
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002",
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003"
+)
+Process-Win7Package -DownloadUrls $urlsX86Ultimate -WimFileName "install_Windows7x86ULTIMATE.wim" -ImageIndex 5 -IsFirstPackage $true
+
+# 4.2 处理x86企业版（修复了文件名称错误）
+$urlsX86Enterprise = @(
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001",
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002"
+)
+Process-Win7Package -DownloadUrls $urlsX86Enterprise -WimFileName "install_Windows7x86ENTERPRISE.wim" -ImageIndex 1 -IsFirstPackage $false
+
+# 4.3 处理x64旗舰版
+$urlsX64Ultimate = @(
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001",
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002",
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003"
+)
+Process-Win7Package -DownloadUrls $urlsX64Ultimate -WimFileName "install_Windows7x64ULTIMATE.wim" -ImageIndex 4 -IsFirstPackage $false
+
+# 4.4 处理x64企业版
+$urlsX64Enterprise = @(
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001",
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002",
+    "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003"
+)
+Process-Win7Package -DownloadUrls $urlsX64Enterprise -WimFileName "install_Windows7x64ENTERPRISE.wim" -ImageIndex 4 -IsFirstPackage $false
+
+# 5. WIM转换为ESD格式（添加recovery压缩参数，标准ESD格式）
+Write-Host "正在将WIM转换为ESD格式..."
+dism /export-image /SourceImageFile:"$win7WimPath" /SourceIndex:1 /DestinationImageFile:"$win7EsdPath" /Compress:recovery /CheckIntegrity
+# 注：若有多个镜像索引，需循环导出（根据实际合并后的索引调整）
+
+# 6. 分卷压缩ESD为1950M（7z分卷参数：-v1950M）
+Write-Host "正在分卷压缩ESD文件（1950M/卷）..."
+$esdArchiveName = Join-Path $workDir "WIN7_ESD.7z"
+& $7zPath a -t7z -v1950M -mx9 "$esdArchiveName" "$win7EsdPath" -y | Out-Null
+
+# 7. 上传到GitHub Releases（需提前安装gh并登录）
+Write-Host "正在上传到GitHub Releases..."
+$releaseTag = "Windows7_ULT&ENT_32&64"
+# 创建Release（若已存在则跳过）
+gh release create $releaseTag --title "Windows7_ULT&ENT_32&64" --notes "Windows7 旗舰版+企业版 32+64位 ESD分卷"
+# 上传所有分卷包
+Get-ChildItem -Path $workDir -Filter "WIN7_ESD.7z.*" | ForEach-Object {
+    gh release upload $releaseTag $_.FullName
+}
+
+# 8. 清理临时文件（可选）
+# Remove-Item -Path $win7WimPath -Force
+# Remove-Item -Path $win7EsdPath -Force
+
+Write-Host "工作流执行完成！"

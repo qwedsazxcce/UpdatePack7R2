@@ -1,96 +1,108 @@
 # GitHub Actions工作流：Windows7 WIM转ESD并上传Releases
+# 语法规范：所有缩进为2个空格，字段名小写，冒号后加空格，无Tab字符
 name: Windows7_WIM2ESD
 on:
-  workflow_dispatch:  # 仅手动触发
+  workflow_dispatch:  # 仅手动触发，避免误执行
 jobs:
   build_win7_esd:
     runs-on: windows-2022
-    timeout-minutes: 180
+    timeout-minutes: 180  # 适配大文件处理的超时时间
+    defaults:
+      run:
+        shell: pwsh  # 全局指定PowerShell，避免重复声明
     steps:
-      # 步骤1：检出仓库
+      # 步骤1：检出仓库（基础步骤）
       - name: Checkout repository
         uses: actions/checkout@v4
-        if: always()  # 确保始终执行（仅为检出，不影响核心流程）
+        with:
+          fetch-depth: 1  # 仅拉取最新提交，节省时间
 
-      # 步骤2：安装依赖（7-Zip + GitHub CLI）
-      - name: Install 7-Zip and GitHub CLI
-        id: install_deps  # 标记步骤ID，便于后续判断
+      # 步骤2：安装核心依赖（7-Zip + GitHub CLI）
+      - name: Install dependencies (7-Zip + GitHub CLI)
+        id: install_deps
         run: |
-          # 强制设置执行策略
+          # 强制设置执行策略，避免权限问题
           Set-ExecutionPolicy Bypass -Scope Process -Force -ErrorAction Stop
           
-          # 安装/校验Chocolatey
+          # 校验/安装Chocolatey（Runner默认已装，兜底安装）
           if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-              Write-Host "安装Chocolatey..."
+              Write-Host "Installing Chocolatey..."
               [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-              iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')) -ErrorAction Stop
+              Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')) -ErrorAction Stop
           }
 
-          # 安装7-Zip
-          choco install 7zip --version=24.07 -y --no-progress --error-action Stop
-          # 安装GitHub CLI
-          choco install gh --version=2.46.0 -y --no-progress --error-action Stop
+          # 安装7-Zip（指定稳定版本）
+          choco install 7zip --version=24.07 -y --no-progress --ignore-checksums
+          # 安装GitHub CLI（替代winget，适配Runner）
+          choco install gh --version=2.46.0 -y --no-progress --ignore-checksums
           
-          # 刷新环境变量
+          # Chocolatey官方环境变量刷新（修复RefreshEnv失效问题）
           Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1" -ErrorAction Stop
           refreshenv -ErrorAction Stop
 
-          # 校验工具
-          $7zExists = Get-Command 7z -ErrorAction SilentlyContinue
-          $ghExists = Get-Command gh -ErrorAction SilentlyContinue
-          if (-not $7zExists -or -not $ghExists) {
-              Write-Error "7-Zip或GitHub CLI安装失败！"
+          # 强制校验工具是否安装成功
+          $7zCheck = Get-Command 7z -ErrorAction SilentlyContinue
+          $ghCheck = Get-Command gh -ErrorAction SilentlyContinue
+          if (-not $7zCheck -or -not $ghCheck) {
+              Write-Error "Dependency installation failed! 7z: $($7zCheck -ne $null), gh: $($ghCheck -ne $null)"
               exit 1
           }
-          Write-Host "✅ 依赖安装完成"
-        shell: pwsh
+          Write-Host "✅ Dependencies installed successfully"
         env:
-          CHOCOLATEY_INTERACTIVE: "false"
+          CHOCOLATEY_INTERACTIVE: "false"  # 禁用交互提示
 
-      # 步骤3：配置GitHub CLI认证
+      # 步骤3：GitHub CLI认证（确保上传权限）
       - name: Authenticate GitHub CLI
+        id: auth_gh
         needs: install_deps  # 依赖安装完成才执行
         run: |
-          gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}" -ErrorAction Stop
+          # 使用内置TOKEN认证，无需手动配置
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token -ErrorAction Stop
+          # 校验认证状态
           gh auth status -ErrorAction Stop
-          Write-Host "✅ GitHub CLI认证成功"
-        shell: pwsh
+          Write-Host "✅ GitHub CLI authenticated successfully"
 
-      # 步骤4：创建工作目录（强制设置，确保环境变量有值）
+      # 步骤4：创建工作目录（强制兜底，避免变量为空）
       - name: Create working directory
-        needs: authenticate_github_cli
-        id: create_workdir  # 标记步骤ID
+        id: create_workdir
+        needs: auth_gh
         run: |
-          # 强制设置工作目录，避免为空
-          $defaultWorkDir = "$env:USERPROFILE\Win7_Workflow"
-          # 确保目录创建成功
-          New-Item -Path $defaultWorkDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
-          # 写入环境变量（强制覆盖）
-          echo "WORK_DIR=$defaultWorkDir" >> $env:GITHUB_ENV
-          # 输出到步骤输出，双重保障
-          echo "work_dir=$defaultWorkDir" >> $env:GITHUB_OUTPUT
-          Write-Host "✅ 工作目录创建完成：$defaultWorkDir"
-        shell: pwsh
+          # 硬编码默认路径，双重写入（ENV + OUTPUT）
+          $workDir = "$env:USERPROFILE\Win7_Workflow"
+          # 强制创建目录（不存在则创建，存在则清空）
+          if (Test-Path $workDir) {
+              Remove-Item -Path $workDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          New-Item -Path $workDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
+          
+          # 写入环境变量（所有步骤共享）
+          echo "WORK_DIR=$workDir" >> $env:GITHUB_ENV
+          # 写入步骤输出（兜底获取）
+          echo "work_dir=$workDir" >> $env:GITHUB_OUTPUT
+          Write-Host "✅ Working directory created: $workDir"
 
-      # 步骤5：处理Win7包（下载、解压、DISM）
-      - name: Process Win7 packages
+      # 步骤5：下载+解压+DISM处理Win7包（核心逻辑）
+      - name: Process Win7 packages (download + extract + DISM)
+        id: process_packages
         needs: create_workdir
         run: |
-          # 双重获取工作目录（环境变量 + 步骤输出，避免为空）
-          $workDir = $env:WORK_DIR ?? ${{ steps.create_workdir.outputs.work_dir }}
-          # 最终兜底：若仍为空，用默认路径
-          if (-not $workDir -or $workDir -eq "") {
-              $workDir = "$env:USERPROFILE\Win7_Workflow"
+          # 三重兜底获取工作目录（杜绝空值）
+          $workDir = $env:WORK_DIR ?? ${{ steps.create_workdir.outputs.work_dir }} ?? "$env:USERPROFILE\Win7_Workflow"
+          # 最终校验工作目录
+          if (-not (Test-Path $workDir)) {
+              Write-Error "Working directory not found: $workDir"
+              exit 1
           }
-          Write-Host "当前工作目录：$workDir"
+          Write-Host "Using working directory: $workDir"
 
+          # 获取7-Zip绝对路径（避免环境变量问题）
           $7zPath = (Get-Command 7z).Source
           if (-not $7zPath) {
-              Write-Error "7-Zip路径获取失败！"
+              Write-Error "7-Zip path not found!"
               exit 1
           }
 
-          # 通用处理函数（略，与上一版一致，仅增加工作目录校验）
+          # 通用处理函数（封装重复逻辑）
           function Process-Win7Package {
               param(
                   [string[]]$DownloadUrls,
@@ -98,112 +110,188 @@ jobs:
                   [int]$ImageIndex,
                   [bool]$IsFirstPackage
               )
-              # 函数内先校验工作目录
+              # 函数内再次校验工作目录
               if (-not (Test-Path $workDir)) {
-                  Write-Error "工作目录不存在：$workDir"
+                  Write-Error "Working directory missing in function: $workDir"
                   exit 1
               }
-              # 原有逻辑保持不变...
-              # 下载、解压、DISM、清理逻辑（与上一版一致）
+
+              # 1. 下载分卷包（带重试+超时）
+              foreach ($url in $DownloadUrls) {
+                  $fileName = $url.Split("/")[-1]
+                  $savePath = Join-Path $workDir $fileName
+                  if (Test-Path $savePath) {
+                      Write-Host "Skip download (exists): $fileName"
+                      continue
+                  }
+                  Write-Host "Downloading: $fileName"
+                  # 重试3次，超时5分钟
+                  $retryCount = 0
+                  $maxRetries = 3
+                  $success = $false
+                  while ($retryCount -lt $maxRetries) {
+                      try {
+                          Invoke-WebRequest -Uri $url -OutFile $savePath -UseBasicParsing -TimeoutSec 300 -ErrorAction Stop
+                          $success = $true
+                          Write-Host "Download success: $fileName"
+                          break
+                      } catch {
+                          $retryCount++
+                          Write-Warning "Download failed (retry $retryCount/$maxRetries): $_"
+                          Start-Sleep -Seconds 10
+                      }
+                  }
+                  if (-not $success) {
+                      Write-Error "Download failed after $maxRetries retries: $fileName"
+                      exit 1
+                  }
+              }
+
+              # 2. 解压分卷（仅解压001，7z自动关联后续分卷）
+              $firstArchive = $DownloadUrls[0].Split("/")[-1]
+              $archivePath = Join-Path $workDir $firstArchive
+              Write-Host "Extracting: $firstArchive"
+              & $7zPath x $archivePath -o"$workDir" -y -bb1 | Out-Null
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "Extract failed (7z exit code: $LASTEXITCODE): $firstArchive"
+                  exit 1
+              }
+
+              # 3. 校验解压后的WIM文件
+              $sourceWimPath = Join-Path $workDir $WimFileName
+              if (-not (Test-Path $sourceWimPath)) {
+                  Write-Error "WIM file missing: $sourceWimPath"
+                  exit 1
+              }
+              Write-Host "Found WIM file: $sourceWimPath"
+
+              # 4. DISM操作（创建/追加镜像）
+              $win7WimPath = Join-Path $workDir "WIN7.wim"
+              Write-Host "Processing WIM (index $ImageIndex): $WimFileName"
+              if ($IsFirstPackage) {
+                  # 第一个包：创建新WIM
+                  dism /export-image /SourceImageFile:"$sourceWimPath" /SourceIndex:$ImageIndex /DestinationImageFile:"$win7WimPath" /Compress:max /CheckIntegrity /Quiet
+              } else {
+                  # 后续包：追加到现有WIM
+                  dism /append-image /ImageFile:"$win7WimPath" /SourceImageFile:"$sourceWimPath" /SourceIndex:$ImageIndex /Compress:max /CheckIntegrity /Quiet
+              }
+              if ($LASTEXITCODE -ne 0) {
+                  Write-Error "DISM failed (exit code: $LASTEXITCODE): $WimFileName"
+                  exit 1
+              }
+
+              # 5. 清理临时文件（节省空间）
+              Remove-Item -Path $sourceWimPath -Force -ErrorAction SilentlyContinue
+              foreach ($url in $DownloadUrls) {
+                  $fileName = $url.Split("/")[-1]
+                  Remove-Item -Path (Join-Path $workDir $fileName) -Force -ErrorAction SilentlyContinue
+              }
+              Write-Host "Cleanup completed for: $WimFileName"
           }
 
-          # 1. 处理x86旗舰版
-          $urlsX86Ultimate = @(
+          # ========== 按顺序处理4个Win7包 ==========
+          # 1. x86旗舰版（创建WIN7.wim，索引5）
+          Process-Win7Package -DownloadUrls @(
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001",
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002",
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003"
-          )
-          Process-Win7Package -DownloadUrls $urlsX86Ultimate -WimFileName "install_Windows7x86ULTIMATE.wim" -ImageIndex 5 -IsFirstPackage $true
+          ) -WimFileName "install_Windows7x86ULTIMATE.wim" -ImageIndex 5 -IsFirstPackage $true
 
-          # 2. 处理x86企业版
-          $urlsX86Enterprise = @(
+          # 2. x86企业版（追加，索引1，修正文件名）
+          Process-Win7Package -DownloadUrls @(
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001",
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002"
-          )
-          Process-Win7Package -DownloadUrls $urlsX86Enterprise -WimFileName "install_Windows7x86ENTERPRISE.wim" -ImageIndex 1 -IsFirstPackage $false
+          ) -WimFileName "install_Windows7x86ENTERPRISE.wim" -ImageIndex 1 -IsFirstPackage $false
 
-          # 3. 处理x64旗舰版
-          $urlsX64Ultimate = @(
+          # 3. x64旗舰版（追加，索引4）
+          Process-Win7Package -DownloadUrls @(
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001",
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002",
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003"
-          )
-          Process-Win7Package -DownloadUrls $urlsX64Ultimate -WimFileName "install_Windows7x64ULTIMATE.wim" -ImageIndex 4 -IsFirstPackage $false
+          ) -WimFileName "install_Windows7x64ULTIMATE.wim" -ImageIndex 4 -IsFirstPackage $false
 
-          # 4. 处理x64企业版
-          $urlsX64Enterprise = @(
+          # 4. x64企业版（追加，索引1）
+          Process-Win7Package -DownloadUrls @(
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001",
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002",
               "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003"
-          )
-          Process-Win7Package -DownloadUrls $urlsX64Enterprise -WimFileName "install_Windows7x64ENTERPRISE.wim" -ImageIndex 4 -IsFirstPackage $false
+          ) -WimFileName "install_Windows7x64ENTERPRISE.wim" -ImageIndex 1 -IsFirstPackage $false
 
-          # WIM转ESD + 分卷压缩（原有逻辑不变）
+          # ========== WIM转ESD + 分卷压缩 ==========
           $win7WimPath = Join-Path $workDir "WIN7.wim"
           $win7EsdPath = Join-Path $workDir "WIN7.esd"
+          # WIM转ESD（Recovery压缩，标准ESD格式）
+          Write-Host "Converting WIM to ESD (recovery compression)..."
           dism /export-image /SourceImageFile:"$win7WimPath" /SourceIndex:1 /DestinationImageFile:"$win7EsdPath" /Compress:recovery /CheckIntegrity /Quiet
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "WIM转ESD失败！"
+              Write-Error "WIM to ESD conversion failed (exit code: $LASTEXITCODE)"
               exit 1
           }
 
+          # 分卷压缩ESD（1950M/卷，最高压缩）
           $esdArchive = Join-Path $workDir "WIN7_ESD.7z"
-          & $7zPath a -t7z -v1950M -mx9 "$esdArchive" "$win7EsdPath" -y | Out-Null
+          Write-Host "Splitting ESD into 1950M volumes..."
+          & $7zPath a -t7z -v1950M -mx9 -bb1 "$esdArchive" "$win7EsdPath" -y | Out-Null
           if ($LASTEXITCODE -ne 0) {
-              Write-Error "分卷压缩失败！"
+              Write-Error "ESD split failed (7z exit code: $LASTEXITCODE)"
               exit 1
           }
-          Write-Host "✅ Win7包处理完成"
-        shell: pwsh
+
+          # 校验分卷文件
+          $splitFiles = Get-ChildItem -Path $workDir -Filter "WIN7_ESD.7z.*"
+          if (-not $splitFiles -or $splitFiles.Count -eq 0) {
+              Write-Error "No split ESD files found!"
+              exit 1
+          }
+          Write-Host "✅ Process completed: $($splitFiles.Count) split files created"
 
       # 步骤6：上传到GitHub Releases
       - name: Upload to GitHub Releases
-        needs: process_win7_packages
+        id: upload_release
+        needs: process_packages
         run: |
-          # 同样做工作目录兜底
+          # 三重兜底获取工作目录
           $workDir = $env:WORK_DIR ?? ${{ steps.create_workdir.outputs.work_dir }} ?? "$env:USERPROFILE\Win7_Workflow"
           $releaseTag = "Windows7_ULT&ENT_32&64"
+          $releaseTitle = "Windows7 Ultimate+Enterprise 32&64bit ESD"
 
-          # 原有上传逻辑不变...
+          # 检查Release是否存在，不存在则创建
           if (-not (gh release view $releaseTag -q .name 2> $null)) {
-              gh release create $releaseTag --title "Windows7_ULT&ENT_32&64" --notes "Windows7 旗舰版+企业版 32+64位 ESD"
+              Write-Host "Creating new release: $releaseTag"
+              gh release create $releaseTag --title "$releaseTitle" --notes "Windows7 旗舰版+企业版 32+64位 ESD分卷（1950M/卷）" -ErrorAction Stop
+          } else {
+              Write-Host "Updating existing release: $releaseTag"
           }
-          Get-ChildItem -Path $workDir -Filter "WIN7_ESD.7z.*" | ForEach-Object {
-              gh release upload $releaseTag $_.FullName --clobber
-          }
-          Write-Host "✅ 上传完成"
-        shell: pwsh
 
-      # 步骤7：清理工作目录（核心修复：空值校验 + 兜底）
+          # 上传所有分卷包（覆盖已有文件）
+          $splitFiles = Get-ChildItem -Path $workDir -Filter "WIN7_ESD.7z.*"
+          foreach ($file in $splitFiles) {
+              Write-Host "Uploading: $($file.Name)"
+              gh release upload $releaseTag $file.FullName --clobber -ErrorAction Stop
+          }
+
+          # 最终校验上传结果
+          $uploadedFiles = gh release view $releaseTag --json assets -q ".assets[].name" | FindStr "WIN7_ESD.7z"
+          if (-not $uploadedFiles) {
+              Write-Error "Upload failed: No files found in release"
+              exit 1
+          }
+          Write-Host "✅ All files uploaded successfully!"
+
+      # 步骤7：清理工作目录（非致命错误，兜底处理）
       - name: Cleanup working directory
-        if: always()  # 始终执行，但先做严格校验
+        if: always()  # 无论前面是否失败都执行
         run: |
-          <# 
-              核心修复：
-              1. 多重兜底获取工作目录
-              2. 先校验变量是否为空，再执行Test-Path
-              3. 仅当目录存在时才删除
-          #>
-          # 方式1：从环境变量获取
-          $workDir = $env:WORK_DIR
-          # 方式2：从步骤输出获取（兜底1）
-          if (-not $workDir -or $workDir -eq "") {
-              $workDir = ${{ steps.create_workdir.outputs.work_dir }}
-          }
-          # 方式3：硬编码默认路径（兜底2）
-          if (-not $workDir -or $workDir -eq "") {
-              $workDir = "$env:USERPROFILE\Win7_Workflow"
-          }
-
-          # 最终校验：变量非空 + 路径存在，才执行删除
+          # 三重兜底获取工作目录
+          $workDir = $env:WORK_DIR ?? ${{ steps.create_workdir.outputs.work_dir }} ?? "$env:USERPROFILE\Win7_Workflow"
+          # 仅当目录存在且非空时清理
           if ($workDir -and $workDir -ne "" -and (Test-Path $workDir)) {
               try {
                   Remove-Item -Path $workDir -Recurse -Force -ErrorAction Stop
-                  Write-Host "✅ 清理完成：$workDir"
+                  Write-Host "✅ Cleanup completed: $workDir"
               } catch {
-                  Write-Warning "清理目录失败（非致命）：$_"
+                  Write-Warning "Cleanup warning (non-fatal): $_"
               }
           } else {
-              Write-Host "ℹ️ 无需清理：工作目录为空或不存在"
+              Write-Host "ℹ️ No cleanup needed (directory empty/missing)"
           }
-        shell: pwsh

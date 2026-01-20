@@ -1,295 +1,217 @@
-name: Windows7_WIM2ESD
+# 工作流名称
+name:Windows7_ULT&ENT_32&64_ESD
+
+# 触发方式：手动触发（推荐），也可添加push/定时触发
 on:
-  workflow_dispatch:  # 仅手动触发，避免误执行
+  workflow_dispatch:
+
+# 工作流权限（上传Releases需要写权限）
+permissions:
+  contents: write
+
+# 作业定义
 jobs:
-  build_win7_esd:
-    runs-on: windows-2022
-    timeout-minutes: 180  # 适配大文件处理的超时时间
+  build-win7-esd:
+    # 使用Windows最新版Runner（必须，DISM是Windows自带工具）
+    runs-on: windows-latest
     defaults:
       run:
-        shell: pwsh  # 全局指定PowerShell，避免重复声明
+        shell: pwsh # 使用PowerShell Core执行命令
+
     steps:
-      # 步骤1：检出仓库（基础步骤）
-      - name: Checkout repository
+      # 步骤1：检出仓库（为了后续上传Releases时关联仓库）
+      - name: Checkout Repository
         uses: actions/checkout@v4
+
+      # 步骤2：创建工作目录（避免文件混乱）
+      - name: Create Working Directory
+        run: |
+          New-Item -Path ./win7-build -ItemType Directory -Force
+          Set-Location ./win7-build
+          Write-Host "当前工作目录：$(Get-Location)"
+
+      # -------------------------- 第一步：处理x86 ULT版本 --------------------------
+      - name: Download Windows7x86ULTIMATE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          # 定义下载链接列表
+          $urls = @(
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001",
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002",
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003"
+          )
+          # 批量下载（带重试）
+          foreach ($url in $urls) {
+            $filename = $url.Split('/')[-1]
+            Write-Host "正在下载：$filename"
+            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+          }
+
+      - name: 解压Windows7x86ULTIMATE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          # 7z解压分卷（只需解压第一个分卷，自动识别后续）
+          7z x -y install_Windows7x86ULTIMATE-26.1.15.7z.001
+          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+
+      - name: 提取x86 ULT第5个镜像到WIN7.wim
+        run: |
+          Set-Location ./win7-build
+          # DISM提取镜像（首次创建WIN7.wim）
+          dism /export-image `
+            /SourceImageFile:install_Windows7x86ULTIMATE.wim `
+            /SourceIndex:5 `
+            /DestinationImageFile:WIN7.wim `
+            /Compress:max `
+            /CheckIntegrity
+          # 删除原WIM文件
+          Remove-Item -Path install_Windows7x86ULTIMATE.wim -Force
+          Write-Host "x86 ULT处理完成，WIN7.wim已创建"
+
+      # -------------------------- 第二步：处理x86 ENT版本 --------------------------
+      - name: Download Windows7x86ENTERPRISE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          $urls = @(
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001",
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002"
+          )
+          foreach ($url in $urls) {
+            $filename = $url.Split('/')[-1]
+            Write-Host "正在下载：$filename"
+            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+          }
+
+      - name: 解压Windows7x86ENTERPRISE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          7z x -y install_Windows7x86ENTERPRISE-26.1.15.7z.001
+          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+
+      - name: 追加x86 ENT第1个镜像到WIN7.wim
+        run: |
+          Set-Location ./win7-build
+          dism /export-image `
+            /SourceImageFile:install_Windows7x86ENTERPRISE.wim `
+            /SourceIndex:1 `
+            /DestinationImageFile:WIN7.wim `
+            /Compress:max `
+            /CheckIntegrity
+          Remove-Item -Path install_Windows7x86ENTERPRISE.wim -Force
+          Write-Host "x86 ENT处理完成，已追加到WIN7.wim"
+
+      # -------------------------- 第三步：处理x64 ULT版本 --------------------------
+      - name: Download Windows7x64ULTIMATE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          $urls = @(
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001",
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002",
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003"
+          )
+          foreach ($url in $urls) {
+            $filename = $url.Split('/')[-1]
+            Write-Host "正在下载：$filename"
+            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+          }
+
+      - name: 解压Windows7x64ULTIMATE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          7z x -y install_Windows7x64ULTIMATE-26.1.15.7z.001
+          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+
+      - name: 追加x64 ULT第4个镜像到WIN7.wim
+        run: |
+          Set-Location ./win7-build
+          dism /export-image `
+            /SourceImageFile:install_Windows7x64ULTIMATE.wim `
+            /SourceIndex:4 `
+            /DestinationImageFile:WIN7.wim `
+            /Compress:max `
+            /CheckIntegrity
+          Remove-Item -Path install_Windows7x64ULTIMATE.wim -Force
+          Write-Host "x64 ULT处理完成，已追加到WIN7.wim"
+
+      # -------------------------- 第四步：处理x64 ENT版本 --------------------------
+      - name: Download Windows7x64ENTERPRISE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          $urls = @(
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001",
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002",
+            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003"
+          )
+          foreach ($url in $urls) {
+            $filename = $url.Split('/')[-1]
+            Write-Host "正在下载：$filename"
+            Invoke-WebRequest -Uri $url -OutFile $filename -RetryCount 3 -RetryIntervalSec 5
+          }
+
+      - name: 解压Windows7x64ENTERPRISE 7z分卷
+        run: |
+          Set-Location ./win7-build
+          7z x -y install_Windows7x64ENTERPRISE-26.1.15.7z.001
+          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+
+      - name: 追加x64 ENT第1个镜像到WIN7.wim
+        run: |
+          Set-Location ./win7-build
+          dism /export-image `
+            /SourceImageFile:install_Windows7x64ENTERPRISE.wim `
+            /SourceIndex:1 `
+            /DestinationImageFile:WIN7.wim `
+            /Compress:max `
+            /CheckIntegrity
+          Remove-Item -Path install_Windows7x64ENTERPRISE.wim -Force
+          Write-Host "x64 ENT处理完成，已追加到WIN7.wim"
+
+      # -------------------------- 第五步：WIM转ESD --------------------------
+      - name: 转换WIN7.wim为WIN7.esd（Recovery压缩）
+        run: |
+          Set-Location ./win7-build
+          # ESD使用recovery压缩（最高压缩比，符合微软ESD标准）
+          dism /export-image `
+            /SourceImageFile:WIN7.wim `
+            /SourceIndex:1 `
+            /DestinationImageFile:WIN7.esd `
+            /Compress:recovery `
+            /CheckIntegrity `
+            /Format:ESD
+          # 验证ESD文件
+          if (Test-Path ./WIN7.esd) {
+            Write-Host "ESD转换完成，文件大小：$(Get-Item ./WIN7.esd).Length / 1GB) GB"
+          } else {
+            throw "ESD转换失败，未找到WIN7.esd文件"
+          }
+
+      # -------------------------- 第六步：1950M分卷压缩 --------------------------
+      - name: 分卷压缩WIN7.esd（1950M/卷）
+        run: |
+          Set-Location ./win7-build
+          # 7z分卷压缩：-v1950M 指定分卷大小，-t7z 7z格式，-mx9 最高压缩
+          7z a -t7z -mx9 -v1950M WIN7.7z WIN7.esd
+          Write-Host "分卷压缩完成，生成文件：$(Get-ChildItem WIN7.7z.*)"
+
+      # -------------------------- 第七步：上传到Releases --------------------------
+      - name: 上传分卷到Releases
+        uses: softprops/action-gh-release@v2
         with:
-          fetch-depth: 1  # 仅拉取最新提交，节省时间
-
-      # 步骤2：安装核心依赖（7-Zip + GitHub CLI）
-      - name: Install dependencies (7-Zip + GitHub CLI)
-        id: install_deps
-        run: |
-          # 强制设置执行策略，避免权限问题
-          Set-ExecutionPolicy Bypass -Scope Process -Force -ErrorAction Stop
-          
-          # 校验/安装Chocolatey（Runner默认已装，兜底安装）
-          if (-not (Get-Command choco -ErrorAction SilentlyContinue)) {
-              Write-Host "Installing Chocolatey..."
-              [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
-              Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')) -ErrorAction Stop
-          }
-
-          # 安装7-Zip（指定稳定版本）
-          choco install 7zip --version=24.07 -y --no-progress --ignore-checksums
-          # 安装GitHub CLI（替代winget，适配Runner）
-          choco install gh --version=2.46.0 -y --no-progress --ignore-checksums
-          
-          # Chocolatey官方环境变量刷新（修复RefreshEnv失效问题）
-          Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1" -ErrorAction Stop
-          refreshenv -ErrorAction Stop
-
-          # 强制校验工具是否安装成功
-          $7zCheck = Get-Command 7z -ErrorAction SilentlyContinue
-          $ghCheck = Get-Command gh -ErrorAction SilentlyContinue
-          if (-not $7zCheck -or -not $ghCheck) {
-              Write-Error "Dependency installation failed! 7z: $($7zCheck -ne $null), gh: $($ghCheck -ne $null)"
-              exit 1
-          }
-          Write-Host "✅ Dependencies installed successfully"
+          # Releases标签（唯一标识）
+          tag_name: Windows7_ULT&ENT_32&64_$(Get-Date -Format "yyyyMMddHHmm")
+          # Releases标题
+          name: Windows7_ULT&ENT_32&64
+          # 上传的文件（所有分卷）
+          files: ./win7-build/WIN7.7z.*
+          # 是否为预发布（可选）
+          prerelease: false
         env:
-          CHOCOLATEY_INTERACTIVE: "false"  # 禁用交互提示
+          # GitHub Token（默认GITHUB_TOKEN有写权限）
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 步骤3：GitHub CLI认证（确保上传权限）
-      - name: Authenticate GitHub CLI
-        id: auth_gh
-        needs: install_deps  # 依赖安装完成才执行
+      # 可选：清理工作目录（节省空间）
+      - name: 清理临时文件
+        if: always() # 无论前面步骤是否失败都执行
         run: |
-          # 使用内置TOKEN认证，无需手动配置
-          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token -ErrorAction Stop
-          # 校验认证状态
-          gh auth status -ErrorAction Stop
-          Write-Host "✅ GitHub CLI authenticated successfully"
-
-      # 步骤4：创建工作目录（强制兜底，避免变量为空）
-      - name: Create working directory
-        id: create_workdir
-        needs: auth_gh
-        run: |
-          # 硬编码默认路径，双重写入（ENV + OUTPUT）
-          $workDir = "$env:USERPROFILE\Win7_Workflow"
-          # 强制创建目录（不存在则创建，存在则清空）
-          if (Test-Path $workDir) {
-              Remove-Item -Path $workDir -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          New-Item -Path $workDir -ItemType Directory -Force -ErrorAction Stop | Out-Null
-          
-          # 写入环境变量（所有步骤共享）
-          echo "WORK_DIR=$workDir" >> $env:GITHUB_ENV
-          # 写入步骤输出（兜底获取）
-          echo "work_dir=$workDir" >> $env:GITHUB_OUTPUT
-          Write-Host "✅ Working directory created: $workDir"
-
-      # 步骤5：下载+解压+DISM处理Win7包（核心逻辑）
-      - name: Process Win7 packages (download + extract + DISM)
-        id: process_packages
-        needs: create_workdir
-        run: |
-          # 三重兜底获取工作目录（杜绝空值）
-          $workDir = $env:WORK_DIR ?? ${{ steps.create_workdir.outputs.work_dir }} ?? "$env:USERPROFILE\Win7_Workflow"
-          # 最终校验工作目录
-          if (-not (Test-Path $workDir)) {
-              Write-Error "Working directory not found: $workDir"
-              exit 1
-          }
-          Write-Host "Using working directory: $workDir"
-
-          # 获取7-Zip绝对路径（避免环境变量问题）
-          $7zPath = (Get-Command 7z).Source
-          if (-not $7zPath) {
-              Write-Error "7-Zip path not found!"
-              exit 1
-          }
-
-          # 通用处理函数（封装重复逻辑）
-          function Process-Win7Package {
-              param(
-                  [string[]]$DownloadUrls,
-                  [string]$WimFileName,
-                  [int]$ImageIndex,
-                  [bool]$IsFirstPackage
-              )
-              # 函数内再次校验工作目录
-              if (-not (Test-Path $workDir)) {
-                  Write-Error "Working directory missing in function: $workDir"
-                  exit 1
-              }
-
-              # 1. 下载分卷包（带重试+超时）
-              foreach ($url in $DownloadUrls) {
-                  $fileName = $url.Split("/")[-1]
-                  $savePath = Join-Path $workDir $fileName
-                  if (Test-Path $savePath) {
-                      Write-Host "Skip download (exists): $fileName"
-                      continue
-                  }
-                  Write-Host "Downloading: $fileName"
-                  # 重试3次，超时5分钟
-                  $retryCount = 0
-                  $maxRetries = 3
-                  $success = $false
-                  while ($retryCount -lt $maxRetries) {
-                      try {
-                          Invoke-WebRequest -Uri $url -OutFile $savePath -UseBasicParsing -TimeoutSec 300 -ErrorAction Stop
-                          $success = $true
-                          Write-Host "Download success: $fileName"
-                          break
-                      } catch {
-                          $retryCount++
-                          Write-Warning "Download failed (retry $retryCount/$maxRetries): $_"
-                          Start-Sleep -Seconds 10
-                      }
-                  }
-                  if (-not $success) {
-                      Write-Error "Download failed after $maxRetries retries: $fileName"
-                      exit 1
-                  }
-              }
-
-              # 2. 解压分卷（仅解压001，7z自动关联后续分卷）
-              $firstArchive = $DownloadUrls[0].Split("/")[-1]
-              $archivePath = Join-Path $workDir $firstArchive
-              Write-Host "Extracting: $firstArchive"
-              & $7zPath x $archivePath -o"$workDir" -y -bb1 | Out-Null
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "Extract failed (7z exit code: $LASTEXITCODE): $firstArchive"
-                  exit 1
-              }
-
-              # 3. 校验解压后的WIM文件
-              $sourceWimPath = Join-Path $workDir $WimFileName
-              if (-not (Test-Path $sourceWimPath)) {
-                  Write-Error "WIM file missing: $sourceWimPath"
-                  exit 1
-              }
-              Write-Host "Found WIM file: $sourceWimPath"
-
-              # 4. DISM操作（创建/追加镜像）
-              $win7WimPath = Join-Path $workDir "WIN7.wim"
-              Write-Host "Processing WIM (index $ImageIndex): $WimFileName"
-              if ($IsFirstPackage) {
-                  # 第一个包：创建新WIM
-                  dism /export-image /SourceImageFile:"$sourceWimPath" /SourceIndex:$ImageIndex /DestinationImageFile:"$win7WimPath" /Compress:max /CheckIntegrity /Quiet
-              } else {
-                  # 后续包：追加到现有WIM
-                  dism /append-image /ImageFile:"$win7WimPath" /SourceImageFile:"$sourceWimPath" /SourceIndex:$ImageIndex /Compress:max /CheckIntegrity /Quiet
-              }
-              if ($LASTEXITCODE -ne 0) {
-                  Write-Error "DISM failed (exit code: $LASTEXITCODE): $WimFileName"
-                  exit 1
-              }
-
-              # 5. 清理临时文件（节省空间）
-              Remove-Item -Path $sourceWimPath -Force -ErrorAction SilentlyContinue
-              foreach ($url in $DownloadUrls) {
-                  $fileName = $url.Split("/")[-1]
-                  Remove-Item -Path (Join-Path $workDir $fileName) -Force -ErrorAction SilentlyContinue
-              }
-              Write-Host "Cleanup completed for: $WimFileName"
-          }
-
-          # ========== 按顺序处理4个Win7包 ==========
-          # 1. x86旗舰版（创建WIN7.wim，索引5）
-          Process-Win7Package -DownloadUrls @(
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001",
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002",
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003"
-          ) -WimFileName "install_Windows7x86ULTIMATE.wim" -ImageIndex 5 -IsFirstPackage $true
-
-          # 2. x86企业版（追加，索引1，修正文件名）
-          Process-Win7Package -DownloadUrls @(
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001",
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002"
-          ) -WimFileName "install_Windows7x86ENTERPRISE.wim" -ImageIndex 1 -IsFirstPackage $false
-
-          # 3. x64旗舰版（追加，索引4）
-          Process-Win7Package -DownloadUrls @(
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001",
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002",
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003"
-          ) -WimFileName "install_Windows7x64ULTIMATE.wim" -ImageIndex 4 -IsFirstPackage $false
-
-          # 4. x64企业版（追加，索引1）
-          Process-Win7Package -DownloadUrls @(
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001",
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002",
-              "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003"
-          ) -WimFileName "install_Windows7x64ENTERPRISE.wim" -ImageIndex 1 -IsFirstPackage $false
-
-          # ========== WIM转ESD + 分卷压缩 ==========
-          $win7WimPath = Join-Path $workDir "WIN7.wim"
-          $win7EsdPath = Join-Path $workDir "WIN7.esd"
-          # WIM转ESD（Recovery压缩，标准ESD格式）
-          Write-Host "Converting WIM to ESD (recovery compression)..."
-          dism /export-image /SourceImageFile:"$win7WimPath" /SourceIndex:1 /DestinationImageFile:"$win7EsdPath" /Compress:recovery /CheckIntegrity /Quiet
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "WIM to ESD conversion failed (exit code: $LASTEXITCODE)"
-              exit 1
-          }
-
-          # 分卷压缩ESD（1950M/卷，最高压缩）
-          $esdArchive = Join-Path $workDir "WIN7_ESD.7z"
-          Write-Host "Splitting ESD into 1950M volumes..."
-          & $7zPath a -t7z -v1950M -mx9 -bb1 "$esdArchive" "$win7EsdPath" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-              Write-Error "ESD split failed (7z exit code: $LASTEXITCODE)"
-              exit 1
-          }
-
-          # 校验分卷文件
-          $splitFiles = Get-ChildItem -Path $workDir -Filter "WIN7_ESD.7z.*"
-          if (-not $splitFiles -or $splitFiles.Count -eq 0) {
-              Write-Error "No split ESD files found!"
-              exit 1
-          }
-          Write-Host "✅ Process completed: $($splitFiles.Count) split files created"
-
-      # 步骤6：上传到GitHub Releases
-      - name: Upload to GitHub Releases
-        id: upload_release
-        needs: process_packages
-        run: |
-          # 三重兜底获取工作目录
-          $workDir = $env:WORK_DIR ?? ${{ steps.create_workdir.outputs.work_dir }} ?? "$env:USERPROFILE\Win7_Workflow"
-          $releaseTag = "Windows7_ULT&ENT_32&64"
-          $releaseTitle = "Windows7 Ultimate+Enterprise 32&64bit ESD"
-
-          # 检查Release是否存在，不存在则创建
-          if (-not (gh release view $releaseTag -q .name 2> $null)) {
-              Write-Host "Creating new release: $releaseTag"
-              gh release create $releaseTag --title "$releaseTitle" --notes "Windows7 旗舰版+企业版 32+64位 ESD分卷（1950M/卷）" -ErrorAction Stop
-          } else {
-              Write-Host "Updating existing release: $releaseTag"
-          }
-
-          # 上传所有分卷包（覆盖已有文件）
-          $splitFiles = Get-ChildItem -Path $workDir -Filter "WIN7_ESD.7z.*"
-          foreach ($file in $splitFiles) {
-              Write-Host "Uploading: $($file.Name)"
-              gh release upload $releaseTag $file.FullName --clobber -ErrorAction Stop
-          }
-
-          # 最终校验上传结果
-          $uploadedFiles = gh release view $releaseTag --json assets -q ".assets[].name" | FindStr "WIN7_ESD.7z"
-          if (-not $uploadedFiles) {
-              Write-Error "Upload failed: No files found in release"
-              exit 1
-          }
-          Write-Host "✅ All files uploaded successfully!"
-
-      # 步骤7：清理工作目录（非致命错误，兜底处理）
-      - name: Cleanup working directory
-        if: always()  # 无论前面是否失败都执行
-        run: |
-          # 三重兜底获取工作目录
-          $workDir = $env:WORK_DIR ?? ${{ steps.create_workdir.outputs.work_dir }} ?? "$env:USERPROFILE\Win7_Workflow"
-          # 仅当目录存在且非空时清理
-          if ($workDir -and $workDir -ne "" -and (Test-Path $workDir)) {
-              try {
-                  Remove-Item -Path $workDir -Recurse -Force -ErrorAction Stop
-                  Write-Host "✅ Cleanup completed: $workDir"
-              } catch {
-                  Write-Warning "Cleanup warning (non-fatal): $_"
-              }
-          } else {
-              Write-Host "ℹ️ No cleanup needed (directory empty/missing)"
-          }
+          Remove-Item -Path ./win7-build -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "临时文件清理完成"

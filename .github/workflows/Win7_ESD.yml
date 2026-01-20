@@ -1,6 +1,5 @@
 name: Windows7
 # 工作流名称
-name: Build Windows7 ULT&ENT 32&64 ESD
 
 # 触发方式：手动触发
 on:

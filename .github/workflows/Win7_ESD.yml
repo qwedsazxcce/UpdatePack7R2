@@ -1,4 +1,4 @@
-  name:Windows7_ULT&ENT_32&64_ESD
+name: Windows7
 
 # 触发方式：手动触发（推荐），也可添加push/定时触发
 on:

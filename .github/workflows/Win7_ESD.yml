@@ -1,328 +1,455 @@
-name: Windows7
-# 工作流名称
+name: Windows7_ULT&ENT_32&64 (Resumable)
 
-# 触发方式：手动触发
 on:
   workflow_dispatch:
 
-# 工作流权限（上传Releases需要写权限）
-permissions:
-  contents: write
+env:
+  # 全局UTF8编码
+  PYTHONIOENCODING: utf-8
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  # 目标文件命名
+  TARGET_WIM: Windows7_ULT&ENT_32&64.wim
+  TARGET_ESD: Windows7_ULT&ENT_32&64.esd
+  SPLIT_SIZE: 1950M
+  # 发布标签/名称
+  RELEASE_TAG: Windows7_ULT&ENT_32&64
+  # 4组压缩包URL + 对应映像索引
+  # 组1: Windows7x86ULTIMATE (3个分卷，第5个映像)
+  URLS_X86_ULT: >
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001,
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002,
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
+  IMG_INDEX_X86_ULT: 5
+  # 组2: Windows7x86ENTERPRISE (2个分卷，第1个映像)
+  URLS_X86_ENT: >
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001,
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002
+  IMG_INDEX_X86_ENT: 1
+  # 组3: Windows7x64ULTIMATE (3个分卷，第4个映像)
+  URLS_X64_ULT: >
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001,
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002,
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003
+  IMG_INDEX_X64_ULT: 4
+  # 组4: Windows7x64ENTERPRISE (3个分卷，第1个映像)
+  URLS_X64_ENT: >
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001,
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002,
+    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
+  IMG_INDEX_X64_ENT: 1
 
-# 作业定义
+# 拆分4个Job，每步删除临时文件，Artifact持久化
 jobs:
-  build-win7-esd:
+  # Job1: 下载+解压+导出指定映像→合并为目标WIM (核心步骤，耗时最长)
+  build-wim:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: pwsh # 使用PowerShell Core执行命令
-
+    timeout-minutes: 180
     steps:
-      # 步骤1：检出仓库
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # 步骤2：创建工作目录
-      - name: Create Working Directory
+      - name: Force Global UTF8 Encoding
+        shell: powershell
         run: |
-          New-Item -Path ./win7-build -ItemType Directory -Force
-          Set-Location ./win7-build
-          Write-Host "当前工作目录：$(Get-Location)"
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
+          [Console]::InputEncoding = [System.Text.UTF8Encoding]::UTF8
+          $PSDefaultParameterValues['*:Encoding'] = 'utf8'
+          Write-Host "✅ UTF8 encoding enabled"
 
-      # -------------------------- 第一步：处理x86 ULT版本 --------------------------
-      - name: Download Windows7x86ULTIMATE 7z分卷
+      - name: Install 7-Zip
+        shell: powershell
         run: |
-          Set-Location ./win7-build
-          $urls = @(
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001",
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002",
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003"
-          )
-          
-          foreach ($url in $urls) {
-            $filename = $url.Split('/')[-1]
-            $retryCount = 0
-            $maxRetries = 3
-            $retryDelay = 5
-            $success = $false
-            
-            while ($retryCount -lt $maxRetries -and -not $success) {
+          $7zPath = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $7zPath)) {
+              Write-Host "🔧 Installing 7-Zip..."
+              choco install 7zip -y --no-progress --ignore-checksums --force
+          }
+          if (-not (Test-Path $7zPath)) { throw "❌ 7-Zip installation failed" }
+          $env:PATH += ";C:\Program Files\7-Zip"
+          Write-Host "✅ 7-Zip installed: $7zPath"
+
+      - name: Build Target WIM (Export Specified Images)
+        shell: powershell
+        run: |
+          # 定义核心函数：处理单组分卷→解压→导出指定映像→删除临时文件
+          function Process-7z-Export-Image {
+              param(
+                  [string]$UrlCsv,
+                  [int]$ImageIndex,
+                  [string]$VolumeName,
+                  [string]$TargetWim
+              )
+
+              Write-Host "`n====================================="
+              Write-Host "🔄 Processing: $VolumeName (Image Index: $ImageIndex)"
+              Write-Host "====================================="
+
+              # 1. 清理旧临时文件（防残留）
+              $tempRoot = "$env:GITHUB_WORKSPACE\temp_$VolumeName"
+              if (Test-Path $tempRoot) {
+                  Write-Host "🧹 Cleaning old temp dir: $tempRoot"
+                  Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+              }
+
+              # 2. 创建临时目录
+              $dlDir = New-Item -Path "$tempRoot\downloads" -ItemType Directory -Force
+              $extractDir = New-Item -Path "$tempRoot\extract" -ItemType Directory -Force
+              Write-Host "📁 Temp dir created: $tempRoot"
+
               try {
-                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
-                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
-                $success = $true
-                Write-Host "$filename 下载成功"
+                  # 3. 拆分并清洗URL（去除空格/换行）
+                  $urls = $UrlCsv -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+                  if ($urls.Count -eq 0) { throw "❌ Empty URL list for $VolumeName" }
+                  Write-Host "📥 Downloading $($urls.Count) volumes..."
+
+                  # 4. 下载所有分卷
+                  foreach ($url in $urls) {
+                      $fileName = [System.IO.Path]::GetFileName($url)
+                      $savePath = "$dlDir\$fileName"
+                      
+                      Write-Host "⬇️ Downloading: $fileName"
+                      curl.exe --progress-bar -L -f -o "$savePath" "$url"
+                      
+                      # 验证下载
+                      if (-not (Test-Path $savePath) -or (Get-Item $savePath).Length -lt 1024) {
+                          throw "❌ Download failed: $fileName (empty or missing)"
+                      }
+                      $fileSize = [math]::Round((Get-Item $savePath).Length/1GB,2)
+                      Write-Host "✅ Downloaded: $fileName ($fileSize GB)"
+                  }
+
+                  # 5. 解压7z分卷（找001分卷）
+                  $7z001 = Get-ChildItem -Path $dlDir -Filter "*.7z.001" | Select-Object -First 1
+                  if (-not $7z001) { throw "❌ 7z.001 volume not found for $VolumeName" }
+                  
+                  Write-Host "🗜️ Extracting: $($7z001.Name)"
+                  & "C:\Program Files\7-Zip\7z.exe" x -y -bb1 -o"$extractDir" "$($7z001.FullName)"
+                  if ($LASTEXITCODE -ne 0) { throw "❌ 7z extract failed (code: $LASTEXITCODE)" }
+                  Write-Host "✅ Extraction completed"
+
+                  # 6. 查找解压后的WIM文件（递归找第一个.wim）
+                  Write-Host "🔍 Finding WIM file in extract dir..."
+                  $wimFiles = Get-ChildItem -Path $extractDir -Filter "*.wim" -Recurse
+                  if ($wimFiles.Count -eq 0) {
+                      Write-Host "❌ No WIM files found! Extract dir content:"
+                      Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Host " - $($_.FullName)" }
+                      throw "❌ WIM file not found for $VolumeName"
+                  }
+                  $sourceWim = $wimFiles | Select-Object -First 1
+                  Write-Host "✅ Found source WIM: $($sourceWim.FullName)"
+
+                  # 7. 导出指定索引的映像到目标WIM
+                  Write-Host "📤 Exporting image $ImageIndex from $($sourceWim.Name)..."
+                  if (-not (Test-Path $TargetWim)) {
+                      # 首次导出：创建新WIM
+                      dism /Export-Image `
+                          /SourceImageFile:"$($sourceWim.FullName)" `
+                          /SourceIndex:$ImageIndex `
+                          /DestinationImageFile:"$TargetWim" `
+                          /Compress:max `
+                          /CheckIntegrity
+                  } else {
+                      # 追加导出：合并到现有WIM
+                      dism /Export-Image `
+                          /SourceImageFile:"$($sourceWim.FullName)" `
+                          /SourceIndex:$ImageIndex `
+                          /DestinationImageFile:"$TargetWim" `
+                          /Compress:max `
+                          /CheckIntegrity
+                  }
+                  
+                  if ($LASTEXITCODE -ne 0) { throw "❌ DISM export failed (code: $LASTEXITCODE)" }
+                  Write-Host "✅ Image $ImageIndex exported to $TargetWim"
+
+              } catch {
+                  Write-Host "❌ Processing failed: $_" -ForegroundColor Red
+                  throw $_
+              } finally {
+                  # 8. 强制删除临时文件（关键：每步清理）
+                  Write-Host "🧹 Deleting temp dir: $tempRoot"
+                  Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
+                  Write-Host "✅ Temp files cleaned"
               }
-              catch {
-                $retryCount++
-                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
-                Start-Sleep -Seconds $retryDelay
-              }
-            }
-            
-            if (-not $success) {
-              throw "$filename 多次下载失败，终止工作流"
-            }
           }
 
-      - name: 解压Windows7x86ULTIMATE 7z分卷
-        run: |
-          Set-Location ./win7-build
-          7z x -y install_Windows7x86ULTIMATE-26.1.15.7z.001
-          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+          # ========== 处理4组压缩包 ==========
+          $finalWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
 
-      - name: 提取x86 ULT第5个镜像到WIN7.wim
-        run: |
-          Set-Location ./win7-build
-          dism /export-image `
-            /SourceImageFile:install_Windows7x86ULTIMATE.wim `
-            /SourceIndex:5 `
-            /DestinationImageFile:WIN7.wim `
-            /Compress:max `
-            /CheckIntegrity
-          Remove-Item -Path install_Windows7x86ULTIMATE.wim -Force
-          Write-Host "x86 ULT处理完成，WIN7.wim已创建"
+          # 1. 处理x86 ULTIMATE (Index 5)
+          Process-7z-Export-Image `
+              -UrlCsv $env:URLS_X86_ULT `
+              -ImageIndex $env:IMG_INDEX_X86_ULT `
+              -VolumeName "Windows7x86ULTIMATE" `
+              -TargetWim $finalWim
 
-      # -------------------------- 第二步：处理x86 ENT版本 --------------------------
-      - name: Download Windows7x86ENTERPRISE 7z分卷
-        run: |
-          Set-Location ./win7-build
-          $urls = @(
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001",
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002"
-          )
-          
-          foreach ($url in $urls) {
-            $filename = $url.Split('/')[-1]
-            $retryCount = 0
-            $maxRetries = 3
-            $retryDelay = 5
-            $success = $false
-            
-            while ($retryCount -lt $maxRetries -and -not $success) {
-              try {
-                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
-                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
-                $success = $true
-                Write-Host "$filename 下载成功"
-              }
-              catch {
-                $retryCount++
-                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
-                Start-Sleep -Seconds $retryDelay
-              }
-            }
-            
-            if (-not $success) {
-              throw "$filename 多次下载失败，终止工作流"
-            }
+          # 2. 处理x86 ENTERPRISE (Index 1)
+          Process-7z-Export-Image `
+              -UrlCsv $env:URLS_X86_ENT `
+              -ImageIndex $env:IMG_INDEX_X86_ENT `
+              -VolumeName "Windows7x86ENTERPRISE" `
+              -TargetWim $finalWim
+
+          # 3. 处理x64 ULTIMATE (Index 4)
+          Process-7z-Export-Image `
+              -UrlCsv $env:URLS_X64_ULT `
+              -ImageIndex $env:IMG_INDEX_X64_ULT `
+              -VolumeName "Windows7x64ULTIMATE" `
+              -TargetWim $finalWim
+
+          # 4. 处理x64 ENTERPRISE (Index 1)
+          Process-7z-Export-Image `
+              -UrlCsv $env:URLS_X64_ENT `
+              -ImageIndex $env:IMG_INDEX_X64_ENT `
+              -VolumeName "Windows7x64ENTERPRISE" `
+              -TargetWim $finalWim
+
+          # ========== 验证最终WIM ==========
+          if (-not (Test-Path $finalWim) -or (Get-Item $finalWim).Length -lt 1024) {
+              throw "❌ Final WIM file is empty or missing"
+          }
+          $wimSize = [math]::Round((Get-Item $finalWim).Length/1GB,2)
+          Write-Host "✅ Final WIM created successfully!"
+          Write-Host "📄 File: $finalWim"
+          Write-Host "📏 Size: $wimSize GB"
+
+          # ========== 清理残留临时文件 ==========
+          $allTempDirs = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "temp_*" -Directory
+          foreach ($dir in $allTempDirs) {
+              Write-Host "🧹 Cleaning leftover temp dir: $($dir.FullName)"
+              Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
           }
 
-      - name: 解压Windows7x86ENTERPRISE 7z分卷
+      # ========== 上传WIM到Artifact (防成果丢失) ==========
+      - name: Upload WIM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows7-target-wim
+          path: ${{ env.TARGET_WIM }}
+          retention-days: 90
+        env:
+          ACTIONS_STEP_DEBUG: true
         run: |
-          Set-Location ./win7-build
-          7z x -y install_Windows7x86ENTERPRISE-26.1.15.7z.001
-          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+          Write-Host "`n📤 Uploading WIM to Artifact..."
+          $wimPath = "${{ env.TARGET_WIM }}"
+          $wimSize = [math]::Round((Get-Item $wimPath).Length/1GB,2)
+          Write-Host "File: $wimPath"
+          Write-Host "Size: $wimSize GB"
+          Write-Host "Artifact Name: windows7-target-wim"
 
-      - name: 追加x86 ENT第1个镜像到WIN7.wim
-        run: |
-          Set-Location ./win7-build
-          dism /export-image `
-            /SourceImageFile:install_Windows7x86ENTERPRISE.wim `
-            /SourceIndex:1 `
-            /DestinationImageFile:WIN7.wim `
-            /Compress:max `
-            /CheckIntegrity
-          Remove-Item -Path install_Windows7x86ENTERPRISE.wim -Force
-          Write-Host "x86 ENT处理完成，已追加到WIN7.wim"
+  # Job2: 转换WIM→ESD (依赖Job1，下载WIM Artifact)
+  build-esd:
+    needs: build-wim
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      # -------------------------- 第三步：处理x64 ULT版本 --------------------------
-      - name: Download Windows7x64ULTIMATE 7z分卷
+      - name: Download WIM Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows7-target-wim
+          path: ${{ github.workspace }}
         run: |
-          Set-Location ./win7-build
-          $urls = @(
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001",
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002",
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003"
-          )
+          Write-Host "📥 Downloading WIM Artifact..."
+          $wimPath = "${{ github.workspace }}\${{ env.TARGET_WIM }}"
+          if (-not (Test-Path $wimPath)) { throw "❌ WIM Artifact not found" }
+          Write-Host "✅ WIM downloaded: $wimPath"
+
+      - name: Force UTF8 Encoding
+        shell: powershell
+        run: |
+          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
+          Write-Host "✅ UTF8 encoding enabled"
+
+      - name: Convert WIM to ESD (Recovery Compression)
+        shell: powershell
+        run: |
+          $finalWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
+          $finalEsd = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
+
+          # 1. 获取WIM中的映像数量（兼容中英文）
+          Write-Host "🔍 Getting image count from WIM..."
+          $env:DISM_OUTPUT_LANGUAGE = "en-US"
+          $dismOutput = dism /Get-WimInfo /WimFile:$finalWim 2>&1 | Out-String
+          $imgMatches = [regex]::Matches($dismOutput, '(Index|索引)\s*\:\s*(\d+)')
+          $imgTotal = $imgMatches.Count
           
-          foreach ($url in $urls) {
-            $filename = $url.Split('/')[-1]
-            $retryCount = 0
-            $maxRetries = 3
-            $retryDelay = 5
-            $success = $false
-            
-            while ($retryCount -lt $maxRetries -and -not $success) {
-              try {
-                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
-                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
-                $success = $true
-                Write-Host "$filename 下载成功"
-              }
-              catch {
-                $retryCount++
-                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
-                Start-Sleep -Seconds $retryDelay
-              }
-            }
-            
-            if (-not $success) {
-              throw "$filename 多次下载失败，终止工作流"
-            }
+          if ($imgTotal -eq 0) {
+              Write-Host "⚠️ No image count found, fallback to export index 1-4"
+              $imgTotal = 4
+          }
+          Write-Host "✅ Found $imgTotal images in WIM"
+
+          # 2. 转换所有映像到ESD (Recovery压缩，体积更小)
+          Write-Host "🗜️ Converting WIM to ESD (Recovery compression)..."
+          for ($i=1; $i -le $imgTotal; $i++) {
+              Write-Host "📤 Exporting image $i/$imgTotal to ESD..."
+              dism /Export-Image `
+                  /SourceImageFile:$finalWim `
+                  /SourceIndex:$i `
+                  /DestinationImageFile:$finalEsd `
+                  /Compress:recovery `
+                  /CheckIntegrity
+              
+              if ($LASTEXITCODE -ne 0) { throw "❌ ESD export failed (image $i, code: $LASTEXITCODE)" }
+              Write-Host "✅ Image $i exported to ESD"
           }
 
-      - name: 解压Windows7x64ULTIMATE 7z分卷
-        run: |
-          Set-Location ./win7-build
-          7z x -y install_Windows7x64ULTIMATE-26.1.15.7z.001
-          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+          # 3. 验证ESD
+          if (-not (Test-Path $finalEsd) -or (Get-Item $finalEsd).Length -lt 1024) {
+              throw "❌ Final ESD file is empty or missing"
+          }
+          $esdSize = [math]::Round((Get-Item $finalEsd).Length/1GB,2)
+          Write-Host "✅ ESD created successfully!"
+          Write-Host "📄 File: $finalEsd"
+          Write-Host "📏 Size: $esdSize GB"
 
-      - name: 追加x64 ULT第4个镜像到WIN7.wim
-        run: |
-          Set-Location ./win7-build
-          dism /export-image `
-            /SourceImageFile:install_Windows7x64ULTIMATE.wim `
-            /SourceIndex:4 `
-            /DestinationImageFile:WIN7.wim `
-            /Compress:max `
-            /CheckIntegrity
-          Remove-Item -Path install_Windows7x64ULTIMATE.wim -Force
-          Write-Host "x64 ULT处理完成，已追加到WIN7.wim"
+          # 4. 删除源WIM (节省空间)
+          Write-Host "🧹 Deleting source WIM file..."
+          Remove-Item -Path $finalWim -Force -ErrorAction SilentlyContinue
+          Write-Host "✅ WIM file deleted"
 
-      # -------------------------- 第四步：处理x64 ENT版本 --------------------------
-      - name: Download Windows7x64ENTERPRISE 7z分卷
+      # ========== 上传ESD到Artifact ==========
+      - name: Upload ESD Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows7-target-esd
+          path: ${{ env.TARGET_ESD }}
+          retention-days: 90
         run: |
-          Set-Location ./win7-build
-          $urls = @(
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001",
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002",
-            "https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003"
-          )
+          Write-Host "`n📤 Uploading ESD to Artifact..."
+          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
+          $esdSize = [math]::Round((Get-Item $esdPath).Length/1GB,2)
+          Write-Host "File: $esdPath"
+          Write-Host "Size: $esdSize GB"
+          Write-Host "Artifact Name: windows7-target-esd"
+
+  # Job3: 分卷压缩ESD (1950M，依赖Job2)
+  split-esd:
+    needs: build-esd
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download ESD Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows7-target-esd
+          path: ${{ github.workspace }}
+        run: |
+          Write-Host "📥 Downloading ESD Artifact..."
+          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
+          if (-not (Test-Path $esdPath)) { throw "❌ ESD Artifact not found" }
+          $esdSize = [math]::Round((Get-Item $esdPath).Length/1GB,2)
+          Write-Host "✅ ESD downloaded: $esdPath ($esdSize GB)"
+
+      - name: Install 7-Zip
+        shell: powershell
+        run: |
+          $7zPath = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $7zPath)) {
+              Write-Host "🔧 Installing 7-Zip..."
+              choco install 7zip -y --no-progress --ignore-checksums --force
+          }
+          if (-not (Test-Path $7zPath)) { throw "❌ 7-Zip installation failed" }
+          Write-Host "✅ 7-Zip installed: $7zPath"
+
+      - name: Split ESD to 1950M Volumes (Hardcoded)
+        shell: powershell
+        run: |
+          $esdFile = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
+          $7zPath = "C:\Program Files\7-Zip\7z.exe"
+          $splitOutput = "$esdFile.7z"
+
+          # 1. 验证ESD存在
+          if (-not (Test-Path $esdFile)) { throw "❌ ESD file not found: $esdFile" }
+
+          # 2. 分卷压缩 (硬编码1950M，避免变量解析错误)
+          Write-Host "🗜️ Splitting ESD to 1950M volumes..."
+          Write-Host "Command: $7zPath a -y -mx=9 -v1950M ""$splitOutput"" ""$esdFile"""
+          & $7zPath a -y -mx=9 -v1950M "$splitOutput" "$esdFile"
           
-          foreach ($url in $urls) {
-            $filename = $url.Split('/')[-1]
-            $retryCount = 0
-            $maxRetries = 3
-            $retryDelay = 5
-            $success = $false
-            
-            while ($retryCount -lt $maxRetries -and -not $success) {
-              try {
-                Write-Host "正在下载（第$($retryCount+1)次尝试）：$filename"
-                Invoke-WebRequest -Uri $url -OutFile $filename -UseBasicParsing -ErrorAction Stop
-                $success = $true
-                Write-Host "$filename 下载成功"
-              }
-              catch {
-                $retryCount++
-                Write-Warning "$filename 下载失败，$retryDelay 秒后重试（剩余重试次数：$($maxRetries - $retryCount)）"
-                Start-Sleep -Seconds $retryDelay
-              }
-            }
-            
-            if (-not $success) {
-              throw "$filename 多次下载失败，终止工作流"
-            }
+          if ($LASTEXITCODE -ne 0) { throw "❌ 7z split failed (code: $LASTEXITCODE)" }
+
+          # 3. 验证分卷文件
+          $splitFiles = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "$($env:TARGET_ESD).7z.*" | Sort-Object Name
+          if ($splitFiles.Count -eq 0) { throw "❌ No split files created" }
+          
+          Write-Host "✅ Split completed successfully!"
+          Write-Host "📊 Total volumes: $($splitFiles.Count)"
+          foreach ($file in $splitFiles) {
+              $fileSize = [math]::Round($file.Length/1GB,2)
+              Write-Host " - $($file.Name): $fileSize GB"
           }
 
-      - name: 解压Windows7x64ENTERPRISE 7z分卷
-        run: |
-          Set-Location ./win7-build
-          7z x -y install_Windows7x64ENTERPRISE-26.1.15.7z.001
-          Write-Host "解压完成，当前文件：$(Get-ChildItem)"
+          # 4. 删除源ESD (节省空间)
+          Write-Host "🧹 Deleting source ESD file..."
+          Remove-Item -Path $esdFile -Force -ErrorAction SilentlyContinue
+          Write-Host "✅ ESD file deleted"
 
-      - name: 追加x64 ENT第1个镜像到WIN7.wim
+      # ========== 上传分卷文件到Artifact (备用) ==========
+      - name: Upload Split Volumes
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows7-split-volumes
+          path: ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*
+          retention-days: 90
         run: |
-          Set-Location ./win7-build
-          dism /export-image `
-            /SourceImageFile:install_Windows7x64ENTERPRISE.wim `
-            /SourceIndex:1 `
-            /DestinationImageFile:WIN7.wim `
-            /Compress:max `
-            /CheckIntegrity
-          Remove-Item -Path install_Windows7x64ENTERPRISE.wim -Force
-          Write-Host "x64 ENT处理完成，已追加到WIN7.wim"
+          Write-Host "`n📤 Uploading split volumes to Artifact..."
+          $splitFiles = Get-ChildItem -Path "${{ github.workspace }}" -Filter "${{ env.TARGET_ESD }}.7z.*"
+          Write-Host "✅ $($splitFiles.Count) volumes to upload"
 
-      # -------------------------- 第五步：WIM转ESD（修复核心逻辑） --------------------------
-      - name: 查看WIN7.wim的镜像索引（调试）
+  # Job4: 发布到GitHub Releases (依赖Job3，指定Tag/Name)
+  publish-release:
+    needs: split-esd
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Split Volumes
+        uses: actions/download-artifact@v4
+        with:
+          name: windows7-split-volumes
+          path: ${{ github.workspace }}
         run: |
-          Set-Location ./win7-build
-          # 列出WIM中的所有镜像索引，确认数量
-          dism /Get-WimInfo /WimFile:WIN7.wim
-          # 获取索引数量（用于循环）
-          $wimInfo = dism /Get-WimInfo /WimFile:WIN7.wim | Select-String -Pattern "Index\s+:\s+(\d+)"
-          $indexes = $wimInfo.Matches | ForEach-Object { $_.Groups[1].Value }
-          Write-Host "WIN7.wim包含的镜像索引：$($indexes -join ', ')"
-          # 将索引保存到环境变量，供后续步骤使用
-          echo "WIM_INDEXES=$($indexes -join ',')" >> $env:GITHUB_ENV
+          Write-Host "📥 Downloading split volumes..."
+          $splitFiles = Get-ChildItem -Path "${{ github.workspace }}" -Filter "${{ env.TARGET_ESD }}.7z.*"
+          if ($splitFiles.Count -eq 0) { throw "❌ Split volumes not found" }
+          Write-Host "✅ $($splitFiles.Count) volumes downloaded"
 
-      - name: 转换WIN7.wim为WIN7.esd（支持多索引）
-        run: |
-          Set-Location ./win7-build
-          $indexes = $env:WIM_INDEXES -split ','
-          
-          # 第一步：导出第一个索引作为ESD的基础（Recovery压缩=ESD格式）
-          Write-Host "导出索引1到WIN7.esd（ESD格式）"
-          dism /export-image `
-            /SourceImageFile:WIN7.wim `
-            /SourceIndex:1 `
-            /DestinationImageFile:WIN7.esd `
-            /Compress:recovery `
-            /CheckIntegrity
-          
-          # 第二步：追加剩余索引到ESD文件
-          if ($indexes.Count -gt 1) {
-            foreach ($index in $indexes | Where-Object { $_ -ne 1 }) {
-              Write-Host "追加索引$index到WIN7.esd"
-              dism /export-image `
-                /SourceImageFile:WIN7.wim `
-                /SourceIndex:$index `
-                /DestinationImageFile:WIN7.esd `
-                /Compress:recovery `
-                /CheckIntegrity
-            }
-          }
-          
-          # 验证ESD文件是否生成
-          if (Test-Path ./WIN7.esd) {
-            Write-Host "ESD转换完成，文件大小：$([math]::Round((Get-Item ./WIN7.esd).Length / 1GB, 2)) GB"
-            # 验证ESD中的索引
-            dism /Get-WimInfo /WimFile:WIN7.esd
-          } else {
-            throw "ESD转换失败，未找到WIN7.esd文件"
-          }
-
-      # -------------------------- 第六步：1950M分卷压缩 --------------------------
-      - name: 分卷压缩WIN7.esd（1950M/卷）
-        run: |
-          Set-Location ./win7-build
-          7z a -t7z -mx9 -v1950M WIN7.7z WIN7.esd
-          Write-Host "分卷压缩完成，生成文件：$(Get-ChildItem WIN7.7z.* | Select-Object -ExpandProperty Name)"
-
-      # -------------------------- 第七步：上传到Releases（核心修改：重试次数改为10次） --------------------------
-      - name: 上传分卷到Releases
+      - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          # Releases标签（唯一标识）
-          tag_name: Windows7_ULT&ENT_32&64
-          # Releases标题
-          name: Windows7_ULT&ENT_32&64
-          # 上传的文件（所有分卷）
-          files: ./win7-build/WIN7.7z.*
-          # 是否为预发布（可选）
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
+          files: ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*
+          draft: false
           prerelease: false
-          # 核心修改1：上传重试次数改为10次
-          retries: 10
-          # 核心修改2：重试间隔改为5秒（避免高频重试触发限流）
-          retry_delay: 5000
+          body: |
+            # Windows7_ULT&ENT_32&64
+            - Compressed ESD split into 1950M volumes
+            - Included images:
+              - Windows7x86ULTIMATE (Index 5)
+              - Windows7x86ENTERPRISE (Index 1)
+              - Windows7x64ULTIMATE (Index 4)
+              - Windows7x64ENTERPRISE (Index 1)
         env:
-          # GitHub Token（默认GITHUB_TOKEN有写权限）
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 清理临时文件
-      - name: 清理临时文件
+      # ========== 最终清理 ==========
+      - name: Final Cleanup
         if: always()
+        shell: powershell
         run: |
-          Remove-Item -Path ./win7-build -Recurse -Force -ErrorAction SilentlyContinue
-          Write-Host "临时文件清理完成"
+          Write-Host "🧹 Final cleanup..."
+          $tempDirs = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "temp_*" -Directory
+          foreach ($dir in $tempDirs) {
+              Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host "✅ All temp files cleaned!"
+          Write-Host "🎉 Workflow completed successfully!"

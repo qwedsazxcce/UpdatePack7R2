@@ -23,7 +23,7 @@ jobs:
         cd ..  #Directory: D:\a\UpdatePack7R2
 
         # 下载UpdatePack7R2
-        curl -L -o UpdatePack7R2.exe https://github.com/yuanpeirong/UpdatePack7R2/releases/download/UpdatePack7R2/UpdatePack7R2-26.1.15.exe
+        curl -L -o UpdatePack7R2.exe https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/UpdatePack7R2-26.1.15.exe
         curl -L -o DirectX_June2010_x86.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/DirectX_June2010_x86.WA
         curl -L -o DirectX_June2010_x64.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/DirectX_June2010_x64.WA
         curl -L -o dotNetFx48_20250909_x86.WA https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/dotNetFx48_20250909_x86.WA

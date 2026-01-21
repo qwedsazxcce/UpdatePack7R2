@@ -1,4 +1,4 @@
-name: Windows7_ULT_ENT (Resumable)
+name: Windows7_ESD (Resumable)
 
 on:
   workflow_dispatch:

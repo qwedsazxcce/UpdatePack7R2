@@ -1,4 +1,4 @@
-name: Windows7_ULT&ENT_32&64 (Resumable)
+name: Windows7_ULT&ENT (Resumable)
 
 on:
   workflow_dispatch:

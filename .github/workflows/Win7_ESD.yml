@@ -7,6 +7,7 @@ env:
   WIN7_X86_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
   WIN7_X86_ENTERPRISE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001
   WIN7_X86_ENTERPRISE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002
+  WIN7_X86_ENTERPRISE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/test.txt
   WIN7_X64_ULTIMATE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001
   WIN7_X64_ULTIMATE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002
   WIN7_X64_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003
@@ -98,6 +99,11 @@ jobs:
       run: |
         cd workdir
         curl -L -o install_Windows7x86ENTERPRISE.7z.002 ${{ env.WIN7_X86_ENTERPRISE_URL_002 }}
+    
+    - name: Download Windows 7 x86 Enterprise part 3
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x86ENTERPRISE.7z.003 ${{ env.WIN7_X86_ENTERPRISE_URL_003 }}
         
     - name: Extract Windows 7 x86 Enterprise archive
       run: |
@@ -130,6 +136,7 @@ jobs:
         cd workdir
         Remove-Item install_Windows7x86ENTERPRISE.7z.001 -Force
         Remove-Item install_Windows7x86ENTERPRISE.7z.002 -Force
+        Remove-Item install_Windows7x86ENTERPRISE.7z.003 -Force
         Remove-Item win7_x86_enterprise -Recurse -Force
         
     # Process Windows 7 x64 Ultimate (第4个映象)
@@ -334,46 +341,29 @@ jobs:
             throw "No split volume files were created"
         }
         
-    - name: Delete existing release assets
+    # Delete existing release and tag if they exist
+    - name: Delete existing release and tag
       run: |
-        # Get release ID
-        $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/Windows7_ULT&ENT_32&64" -Headers @{
-          Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}"
-        }
-        
-        # Get all assets for this release
-        $assets = $releaseInfo.assets
-        
-        # Delete assets that match our pattern
-        foreach ($asset in $assets) {
-          if ($asset.name -match "Windows7_ULT&ENT_32&64.7z.") {
-            Write-Host "Deleting asset: $($asset.name)"
-            try {
-              Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($asset.id)" -Headers @{
-                Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}"
-              }
-              Write-Host "Successfully deleted $($asset.name)"
-            } catch {
-              Write-Host "Could not delete asset $($asset.name): $($_.Exception.Message)"
-            }
-          }
-        }
-      shell: pwsh
-      continue-on-error: true
-      
-    - name: Prepare release assets list
-      run: |
-        cd workdir
-        $files = Get-ChildItem -Path . -Filter "Windows7_ULT&ENT_32&64.7z.*" | ForEach-Object { "workdir/$($_.Name)" }
-        if ($files) {
-            $filesList = $files -join "`n"
-            echo "FILES_LIST<<EOF`n$filesList`nEOF" >> $env:GITHUB_ENV
+        # Check if release exists and delete it
+        $releaseExists = gh release view Windows7_ULT&ENT_32&64 --json id --jq ".id" 2>$null
+        if ($releaseExists) {
+            Write-Host "Deleting existing release Windows7_ULT&ENT_32&64"
+            gh release delete Windows7_ULT&ENT_32&64 --cleanup-tag --yes
         } else {
-            echo "No split files found!"
-            exit 1
+            Write-Host "No existing release found, proceeding..."
         }
-      shell: pwsh
-      
+        
+        # Check if tag exists and delete it
+        $tagExists = git ls-remote --tags origin Windows7_ULT&ENT_32&64 2>$null
+        if ($tagExists) {
+            Write-Host "Deleting existing tag Windows7_ULT&ENT_32&64"
+            git push origin --delete refs/tags/Windows7_ULT&ENT_32&64
+        } else {
+            Write-Host "No existing tag found, proceeding..."
+        }
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
     - name: Upload release assets
       uses: softprops/action-gh-release@v1
       with:
@@ -382,8 +372,8 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: false
-        overwrite: true
+        overwrite: false  # Now set to false since we've already deleted the previous release
         files: |
-          ${{ env.FILES_LIST }}
+          workdir/*.7z.*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,207 @@
+name: Test Upload Function
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_owner:
+        description: 'Repository Owner (默认自动检测)'
+        required: false
+        default: ''
+      repo_name:
+        description: 'Repository Name (默认自动检测)'
+        required: false
+        default: ''
+
+env:
+  # 测试文件下载URL
+  TEST_FILE_1_URL: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install-26.1.15/EasyRCV3.V3.8_.7z
+  TEST_FILE_2_URL: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install-26.1.15/OpenCode.Desktop.Installer.exe
+  
+  # 目标文件名（与原始YAML保持一致）
+  TARGET_FILE_1: Windows7_ULT&ENT_32&64.7z.001
+  TARGET_FILE_2: Windows7_ULT&ENT_32&64.7z.002
+  
+  # Release相关信息
+  RELEASE_TAG: Windows7_ULT&ENT_32&64
+  RELEASE_NAME: Windows7_ULT&ENT_32&64
+
+jobs:
+  test-upload:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup PowerShell
+      run: |
+        # 确保使用最新版本的PowerShell
+        $PSVersionTable.PSVersion
+        
+    - name: Create working directory
+      run: |
+        mkdir workdir
+        cd workdir
+        
+    - name: Download test file 1
+      run: |
+        cd workdir
+        Write-Host "Downloading: ${{ env.TEST_FILE_1_URL }}"
+        curl -L -o "${{ env.TARGET_FILE_1 }}" "${{ env.TEST_FILE_1_URL }}"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download test file 1"
+        }
+        Write-Host "Download completed: ${{ env.TARGET_FILE_1 }}"
+        
+    - name: Download test file 2
+      run: |
+        cd workdir
+        Write-Host "Downloading: ${{ env.TEST_FILE_2_URL }}"
+        curl -L -o "${{ env.TARGET_FILE_2 }}" "${{ env.TEST_FILE_2_URL }}"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download test file 2"
+        }
+        Write-Host "Download completed: ${{ env.TARGET_FILE_2 }}"
+        
+    - name: Verify downloaded files
+      run: |
+        cd workdir
+        $files = @("${{ env.TARGET_FILE_1 }}", "${{ env.TARGET_FILE_2 }}")
+        foreach ($file in $files) {
+            if (Test-Path $file) {
+                $size = (Get-Item $file).Length
+                Write-Host "✓ $file ($([math]::Round($size / 1MB, 2)) MB)"
+            } else {
+                throw "File not found: $file"
+            }
+        }
+        
+    - name: Get repository information
+      id: repo_info
+      run: |
+        # 自动检测仓库信息
+        $repoUrl = git remote get-url origin
+        Write-Host "Repository URL: $repoUrl"
+        
+        if ($repoUrl -match "github.com[:/](.+?)/(.+?)\.git") {
+            $owner = $matches[1]
+            $name = $matches[2]
+            Write-Host "Detected owner: $owner"
+            Write-Host "Detected name: $name"
+            
+            # 如果用户通过输入参数指定了，则使用用户指定的值
+            if ("${{ github.event.inputs.repo_owner }}" -ne "") {
+                $owner = "${{ github.event.inputs.repo_owner }}"
+                Write-Host "Using specified owner: $owner"
+            }
+            if ("${{ github.event.inputs.repo_name }}" -ne "") {
+                $name = "${{ github.event.inputs.repo_name }}"
+                Write-Host "Using specified name: $name"
+            }
+            
+            echo "repo_owner=$owner" >> $env:GITHUB_OUTPUT
+            echo "repo_name=$name" >> $env:GITHUB_OUTPUT
+        } else {
+            throw "Could not parse repository information from URL: $repoUrl"
+        }
+      shell: pwsh
+      
+    - name: Delete existing release assets
+      run: |
+        $repoOwner = "${{ steps.repo_info.outputs.repo_owner }}"
+        $repoName = "${{ steps.repo_info.outputs.repo_name }}"
+        $token = "${{ secrets.GITHUB_TOKEN }}"
+        
+        Write-Host "Repository: $repoOwner/$repoName"
+        Write-Host "Release tag: ${{ env.RELEASE_TAG }}"
+        
+        # Get release information
+        try {
+            $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$repoOwner/$repoName/releases/tags/${{ env.RELEASE_TAG }}" -Headers @{
+                Authorization = "Bearer $token"
+            }
+            Write-Host "Found existing release"
+        } catch {
+            Write-Host "Release not found, will create new one"
+            $releaseInfo = $null
+        }
+        
+        # Delete existing assets that match our pattern
+        if ($releaseInfo -and $releaseInfo.assets) {
+            foreach ($asset in $releaseInfo.assets) {
+                if ($asset.name -match "Windows7_ULT&ENT_32&64.7z.") {
+                    Write-Host "Deleting asset: $($asset.name)"
+                    try {
+                        Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repoOwner/$repoName/releases/assets/$($asset.id)" -Headers @{
+                            Authorization = "Bearer $token"
+                        }
+                        Write-Host "Successfully deleted $($asset.name)"
+                    } catch {
+                        Write-Host "Could not delete asset $($asset.name): $($_.Exception.Message)"
+                    }
+                }
+            }
+        }
+      shell: pwsh
+      continue-on-error: true
+      
+    - name: Prepare release assets list
+      run: |
+        cd workdir
+        $files = Get-ChildItem -Path . -Filter "Windows7_ULT&ENT_32&64.7z.*" | ForEach-Object { "workdir/$($_.Name)" }
+        if ($files) {
+            $filesList = $files -join "`n"
+            Write-Host "Files to upload:"
+            Write-Host $filesList
+            echo "FILES_LIST<<EOF" >> $env:GITHUB_ENV
+            echo "$filesList" >> $env:GITHUB_ENV
+            echo "EOF" >> $env:GITHUB_ENV
+        } else {
+            Write-Error "No split files found!"
+            exit 1
+        }
+      shell: pwsh
+      
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        name: ${{ env.RELEASE_NAME }}
+        tag_name: ${{ env.RELEASE_TAG }}
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+        overwrite: true
+        files: |
+          ${{ env.FILES_LIST }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Verify upload success
+      run: |
+        $repoOwner = "${{ steps.repo_info.outputs.repo_owner }}"
+        $repoName = "${{ steps.repo_info.outputs.repo_name }}"
+        $token = "${{ secrets.GITHUB_TOKEN }}"
+        
+        # Get final release information
+        try {
+            $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$repoOwner/$repoName/releases/tags/${{ env.RELEASE_TAG }}" -Headers @{
+                Authorization = "Bearer $token"
+            }
+            
+            Write-Host "Release verification:"
+            Write-Host "Release name: $($releaseInfo.name)"
+            Write-Host "Release tag: $($releaseInfo.tag_name)"
+            Write-Host "Assets count: $($releaseInfo.assets.Count)"
+            
+            $uploadedAssets = $releaseInfo.assets | Where-Object { $_.name -match "Windows7_ULT&ENT_32&64.7z." }
+            if ($uploadedAssets.Count -gt 0) {
+                Write-Host "Successfully uploaded files:"
+                foreach ($asset in $uploadedAssets) {
+                    Write-Host "  - $($asset.name) ($([math]::Round($asset.size / 1MB, 2)) MB)"
+                }
+            } else {
+                Write-Warning "No matching assets found in release"
+            }
+        } catch {
+            Write-Error "Failed to verify upload: $($_.Exception.Message)"
+        }
+      shell: pwsh

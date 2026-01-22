@@ -1,3 +1,30 @@
+name: Windows_7_ULT&ENT_32&64
+
+env:
+  # Download URL environment variables - for easy replacement later
+  WIN7_X86_ULTIMATE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
+  WIN7_X86_ULTIMATE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
+  WIN7_X86_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
+  WIN7_X86_ENTERPRISE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001
+  WIN7_X86_ENTERPRISE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002
+  WIN7_X86_ENTERPRISE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/test.txt
+  WIN7_X64_ULTIMATE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001
+  WIN7_X64_ULTIMATE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002
+  WIN7_X64_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003
+  WIN7_X64_ENTERPRISE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001
+  WIN7_X64_ENTERPRISE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
+  WIN7_X64_ENTERPRISE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/Windows_7_ULT_ENT_32_64.yml'
+
+jobs:
+
+
 # Delete existing release and tag if they exist
 - name: Delete existing release and tag
   shell: pwsh  # 明确指定PowerShell Shell，匹配脚本语法

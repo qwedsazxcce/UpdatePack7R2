@@ -1,4 +1,4 @@
-name: Windows_7_ULT_ENT_32_64
+name: Windows_7_ULT&ENT_32&64
 
 env:
   # Download URL environment variables - for easy replacement later
@@ -70,7 +70,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export fifth image to new WIM file (第5个映象)
-            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT&ENT_32&64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:5 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x86 Ultimate" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to export WIM image for x86 Ultimate"
@@ -115,7 +115,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export first image and append to existing WIM file (第1个映象)
-            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT&ENT_32&64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x86 Enterprise" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to append WIM image for x86 Enterprise"
@@ -164,7 +164,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export fourth image and append to existing WIM file (第4个映象)
-            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT&ENT_32&64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:4 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x64 Ultimate" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to append WIM image for x64 Ultimate"
@@ -214,7 +214,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export first image and append to existing WIM file (第1个映象)
-            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT&ENT_32&64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x64 Enterprise" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to append WIM image for x64 Enterprise"
@@ -238,19 +238,19 @@ jobs:
         cd workdir
         
         # Verify source WIM file exists
-        $wimPath = "Windows7_ULT_ENT_32_64.wim"
+        $wimPath = "Windows7_ULT&ENT_32&64.wim"
         if (Test-Path $wimPath) {
             Write-Host "Found WIM file: $wimPath"
             $wimFile = Get-Item $wimPath
         } else {
             Write-Host "Looking for WIM file in parent directory..."
-            $wimPath = "..\\Windows7_ULT_ENT_32_64.wim"
+            $wimPath = "..\\Windows7_ULT&ENT_32&64.wim"
             if (Test-Path $wimPath) {
                 Write-Host "Found WIM file: $wimPath"
                 $wimFile = Get-Item $wimPath
             } else {
                 # Check all subdirectories
-                $wimFile = Get-ChildItem -Path .. -Filter "Windows7_ULT_ENT_32_64.wim" -Recurse | Select-Object -First 1
+                $wimFile = Get-ChildItem -Path .. -Filter "Windows7_ULT&ENT_32&64.wim" -Recurse | Select-Object -First 1
                 if (-not $wimFile) {
                     Write-Host "WIM files in workdir: $(Get-ChildItem -Path . -Filter "*.wim" -Recurse)"
                     throw "Source WIM file not found"
@@ -259,7 +259,7 @@ jobs:
         }
         
         Write-Host "Converting WIM to ESD with maximum compression..."
-        $esdFile = "Windows7_ULT_ENT_32_64.esd"
+        $esdFile = "Windows7_ULT&ENT_32&64.esd"
         # Ensure full path is used for both source and destination
         $sourcePath = Resolve-Path $wimFile.FullName
         # Ensure full path is used for both source and destination
@@ -302,7 +302,7 @@ jobs:
         cd workdir
         
         # Verify ESD file exists before splitting
-        $esdFile = "Windows7_ULT_ENT_32_64.esd"
+        $esdFile = "Windows7_ULT&ENT_32&64.esd"
         if (Test-Path $esdFile) {
             Write-Host "Found ESD file: $esdFile"
         } else {
@@ -311,20 +311,20 @@ jobs:
         }
         
         Write-Host "Splitting ESD file into 1950MB volumes..."
-        $outputArchive = "Windows7_ULT_ENT_32_64.7z"
+        $outputArchive = "Windows7_ULT&ENT_32&64.7z"
         7z a -v1950M "$outputArchive" "$esdFile"
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to split ESD file"
         }
         
         Write-Host "Verifying split archive integrity..."
-        7z t $outputArchive.001
+        7z t "$outputArchive.001"
         if ($LASTEXITCODE -ne 0) {
             throw "Split archive integrity check failed"
         }
         
         # Verify split files were created
-        $splitFiles = Get-ChildItem -Path . -Filter "Windows7_ULT_ENT_32_64.7z.*"
+        $splitFiles = Get-ChildItem -Path . -Filter "Windows7_ULT&ENT_32&64.7z.*"
         if ($splitFiles -and $splitFiles.Count -gt 0) {
             Write-Host "Created $($splitFiles.Count) volume files:"
             foreach ($file in $splitFiles) {
@@ -337,9 +337,9 @@ jobs:
     - name: Upload release assets
       uses: softprops/action-gh-release@v1
       with:
-        name: Windows7_ULT_ENT_32_64
-        tag_name: Windows7_ULT_ENT_32_64
+        name: Windows7_ULT&ENT_32&64
+        tag_name: Windows7_ULT&ENT_32&64
         files: |
-          workdir/Windows7_ULT_ENT_32_64.7z.*
+          workdir/"Windows7_ULT&ENT_32&64.7z.*"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

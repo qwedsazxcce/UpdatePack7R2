@@ -260,7 +260,9 @@ jobs:
         
         Write-Host "Converting WIM to ESD with maximum compression..."
         $esdFile = "Windows7_ULT_ENT_32_64.esd"
-        dism /Export-Image /SourceImageFile:$($wimFile.FullName) /SourceIndex:* /DestinationImageFile:$esdFile /Compress:recovery
+        # Ensure full path is used for both source and destination
+        $sourcePath = Resolve-Path $wimFile.FullName
+        dism /Export-Image /SourceImageFile:"$sourcePath" /SourceAll /DestinationImageFile:"$esdFile" /Compress:recovery
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to convert WIM to ESD"
         }
@@ -289,7 +291,7 @@ jobs:
         
         Write-Host "Splitting ESD file into 1950MB volumes..."
         $outputArchive = "Windows7_ULT_ENT_32_64.7z"
-        7z a -v1950M $outputArchive $esdFile
+        7z a -v1950M "$outputArchive" "$esdFile"
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to split ESD file"
         }

@@ -1,456 +1,302 @@
-name: Windows7_ULT&ENT_32&64 (Resumable)
-
-on:
-  workflow_dispatch:
+name: Windows_7_ULT_ENT_32_64
 
 env:
-  PYTHONIOENCODING: utf-8
-  LC_ALL: C.UTF-8
-  LANG: C.UTF-8
-  TARGET_WIM: Windows7_ULT&ENT_32&64.wim
-  TARGET_ESD: Windows7_ULT&ENT_32&64.esd
-  RELEASE_TAG: Windows7_ULT&ENT_32&64
-  # 4组压缩包URL + 映像索引
-  URLS_X86_ULT: >
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
-  IMG_INDEX_X86_ULT: 5
-  URLS_X86_ENT: >
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002
-  IMG_INDEX_X86_ENT: 1
-  URLS_X64_ULT: >
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003
-  IMG_INDEX_X64_ULT: 4
-  URLS_X64_ENT: >
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002,
-    https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
-  IMG_INDEX_X64_ENT: 1
+  # Download URL environment variables - for easy replacement later
+  WIN7_X86_ULTIMATE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
+  WIN7_X86_ULTIMATE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
+  WIN7_X86_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
+  WIN7_X86_ENTERPRISE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001
+  WIN7_X86_ENTERPRISE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002
+  WIN7_X64_ULTIMATE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001
+  WIN7_X64_ULTIMATE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002
+  WIN7_X64_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003
+  WIN7_X64_ENTERPRISE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001
+  WIN7_X64_ENTERPRISE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
+  WIN7_X64_ENTERPRISE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/Windows_7_ULT_ENT_32_64.yml'
 
 jobs:
-  build-wim:
-    runs-on: windows-latest
-    timeout-minutes: 180
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Force Global UTF8 Encoding
-        shell: powershell
-        run: |
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
-          [Console]::InputEncoding = [System.Text.UTF8Encoding]::UTF8
-          $PSDefaultParameterValues['*:Encoding'] = 'utf8'
-          Write-Host "✅ UTF8 encoding enabled"
-
-      - name: Install 7-Zip
-        shell: powershell
-        run: |
-          $7zPath = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $7zPath)) {
-              Write-Host "🔧 Installing 7-Zip..."
-              choco install 7zip -y --no-progress --ignore-checksums --force
-          }
-          if (-not (Test-Path $7zPath)) { throw "❌ 7-Zip installation failed" }
-          $env:PATH += ";C:\Program Files\7-Zip"
-          Write-Host "✅ 7-Zip installed: $7zPath"
-
-      - name: Build Target WIM (Export Specified Images)
-        shell: powershell
-        run: |
-          function Process-7z-Export-Image {
-              param(
-                  [string]$UrlCsv,
-                  [int]$ImageIndex,
-                  [string]$VolumeName,
-                  [string]$TargetWim
-              )
-
-              Write-Host "`n====================================="
-              Write-Host "🔄 Processing: $VolumeName (Image Index: $ImageIndex)"
-              Write-Host "====================================="
-
-              $tempRoot = "$env:GITHUB_WORKSPACE\temp_$VolumeName"
-              if (Test-Path $tempRoot) {
-                  Write-Host "🧹 Cleaning old temp dir: $tempRoot"
-                  Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
-              }
-
-              $dlDir = New-Item -Path "$tempRoot\downloads" -ItemType Directory -Force
-              $extractDir = New-Item -Path "$tempRoot\extract" -ItemType Directory -Force
-              Write-Host "📁 Temp dir created: $tempRoot"
-
-              try {
-                  $urls = $UrlCsv -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
-                  if ($urls.Count -eq 0) { throw "❌ Empty URL list for $VolumeName" }
-                  Write-Host "📥 Downloading $($urls.Count) volumes..."
-
-                  foreach ($url in $urls) {
-                      $fileName = [System.IO.Path]::GetFileName($url)
-                      $savePath = "$dlDir\$fileName"
-                      
-                      Write-Host "⬇️ Downloading: $fileName"
-                      curl.exe --progress-bar -L -f -o "$savePath" "$url"
-                      
-                      if (-not (Test-Path $savePath) -or (Get-Item $savePath).Length -lt 1024) {
-                          throw "❌ Download failed: $fileName (empty or missing)"
-                      }
-                      $fileSize = [math]::Round((Get-Item $savePath).Length/1GB,2)
-                      Write-Host "✅ Downloaded: $fileName ($fileSize GB)"
-                  }
-
-                  $7z001 = Get-ChildItem -Path $dlDir -Filter "*.7z.001" | Select-Object -First 1
-                  if (-not $7z001) { throw "❌ 7z.001 volume not found for $VolumeName" }
-                  
-                  Write-Host "🗜️ Extracting: $($7z001.Name)"
-                  & "C:\Program Files\7-Zip\7z.exe" x -y -bb1 -o"$extractDir" "$($7z001.FullName)"
-                  if ($LASTEXITCODE -ne 0) { throw "❌ 7z extract failed (code: $LASTEXITCODE)" }
-                  Write-Host "✅ Extraction completed"
-
-                  Write-Host "🔍 Finding WIM file in extract dir..."
-                  $wimFiles = Get-ChildItem -Path $extractDir -Filter "*.wim" -Recurse
-                  if ($wimFiles.Count -eq 0) {
-                      Write-Host "❌ No WIM files found! Extract dir content:"
-                      Get-ChildItem -Path $extractDir -Recurse | ForEach-Object { Write-Host " - $($_.FullName)" }
-                      throw "❌ WIM file not found for $VolumeName"
-                  }
-                  $sourceWim = $wimFiles | Select-Object -First 1
-                  Write-Host "✅ Found source WIM: $($sourceWim.FullName)"
-
-                  Write-Host "📤 Exporting image $ImageIndex from $($sourceWim.Name)..."
-                  if (-not (Test-Path $TargetWim)) {
-                      dism /Export-Image `
-                          /SourceImageFile:"$($sourceWim.FullName)" `
-                          /SourceIndex:$ImageIndex `
-                          /DestinationImageFile:"$TargetWim" `
-                          /Compress:max `
-                          /CheckIntegrity
-                  } else {
-                      dism /Export-Image `
-                          /SourceImageFile:"$($sourceWim.FullName)" `
-                          /SourceIndex:$ImageIndex `
-                          /DestinationImageFile:"$TargetWim" `
-                          /Compress:max `
-                          /CheckIntegrity
-                  }
-                  
-                  if ($LASTEXITCODE -ne 0) { throw "❌ DISM export failed (code: $LASTEXITCODE)" }
-                  Write-Host "✅ Image $ImageIndex exported to $TargetWim"
-
-              } catch {
-                  Write-Host "❌ Processing failed: $_" -ForegroundColor Red
-                  throw $_
-              } finally {
-                  Write-Host "🧹 Deleting temp dir: $tempRoot"
-                  Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
-                  Write-Host "✅ Temp files cleaned"
-              }
-          }
-
-          $finalWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
-
-          # 处理4组压缩包
-          Process-7z-Export-Image `
-              -UrlCsv $env:URLS_X86_ULT `
-              -ImageIndex $env:IMG_INDEX_X86_ULT `
-              -VolumeName "Windows7x86ULTIMATE" `
-              -TargetWim $finalWim
-
-          Process-7z-Export-Image `
-              -UrlCsv $env:URLS_X86_ENT `
-              -ImageIndex $env:IMG_INDEX_X86_ENT `
-              -VolumeName "Windows7x86ENTERPRISE" `
-              -TargetWim $finalWim
-
-          Process-7z-Export-Image `
-              -UrlCsv $env:URLS_X64_ULT `
-              -ImageIndex $env:IMG_INDEX_X64_ULT `
-              -VolumeName "Windows7x64ULTIMATE" `
-              -TargetWim $finalWim
-
-          Process-7z-Export-Image `
-              -UrlCsv $env:URLS_X64_ENT `
-              -ImageIndex $env:IMG_INDEX_X64_ENT `
-              -VolumeName "Windows7x64ENTERPRISE" `
-              -TargetWim $finalWim
-
-          # 验证最终WIM
-          if (-not (Test-Path $finalWim) -or (Get-Item $finalWim).Length -lt 1024) {
-              throw "❌ Final WIM file is empty or missing"
-          }
-          $wimSize = [math]::Round((Get-Item $finalWim).Length/1GB,2)
-          Write-Host "✅ Final WIM created successfully!"
-          Write-Host "📄 File: $finalWim"
-          Write-Host "📏 Size: $wimSize GB"
-
-          # 清理残留临时文件
-          $allTempDirs = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "temp_*" -Directory
-          foreach ($dir in $allTempDirs) {
-              Write-Host "🧹 Cleaning leftover temp dir: $($dir.FullName)"
-              Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-          }
-
-      # 修复：拆分自定义提示和上传Action（去掉uses里的run）
-      - name: Show WIM Upload Info
-        shell: powershell
-        run: |
-          Write-Host "`n📤 Preparing to upload WIM to Artifact..."
-          $wimPath = "${{ env.TARGET_WIM }}"
-          $wimSize = [math]::Round((Get-Item $wimPath).Length/1GB,2)
-          Write-Host "File: $wimPath"
-          Write-Host "Size: $wimSize GB"
-          Write-Host "Artifact Name: windows7-target-wim"
-
-      - name: Upload WIM Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows7-target-wim
-          path: ${{ env.TARGET_WIM }}
-          retention-days: 90
-        env:
-          ACTIONS_STEP_DEBUG: true
-
-  build-esd:
-    needs: build-wim
-    runs-on: windows-latest
-    timeout-minutes: 90
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # 修复：拆分下载提示和下载Action
-      - name: Show WIM Download Info
-        shell: powershell
-        run: |
-          Write-Host "📥 Preparing to download WIM Artifact..."
-          $wimPath = "${{ github.workspace }}\${{ env.TARGET_WIM }}"
-          Write-Host "Expected WIM path: $wimPath"
-
-      - name: Download WIM Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: windows7-target-wim
-          path: ${{ github.workspace }}
-
-      - name: Verify WIM Download
-        shell: powershell
-        run: |
-          $wimPath = "${{ github.workspace }}\${{ env.TARGET_WIM }}"
-          if (-not (Test-Path $wimPath)) { throw "❌ WIM Artifact not found at $wimPath" }
-          Write-Host "✅ WIM downloaded successfully: $wimPath"
-
-      - name: Force UTF8 Encoding
-        shell: powershell
-        run: |
-          [Console]::OutputEncoding = [System.Text.UTF8Encoding]::UTF8
-          Write-Host "✅ UTF8 encoding enabled"
-
-      - name: Convert WIM to ESD (Recovery Compression)
-        shell: powershell
-        run: |
-          $finalWim = "$env:GITHUB_WORKSPACE\$env:TARGET_WIM"
-          $finalEsd = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
-
-          Write-Host "🔍 Getting image count from WIM..."
-          $env:DISM_OUTPUT_LANGUAGE = "en-US"
-          $dismOutput = dism /Get-WimInfo /WimFile:$finalWim 2>&1 | Out-String
-          $imgMatches = [regex]::Matches($dismOutput, '(Index|索引)\s*\:\s*(\d+)')
-          $imgTotal = $imgMatches.Count
-          
-          if ($imgTotal -eq 0) {
-              Write-Host "⚠️ No image count found, fallback to export index 1-4"
-              $imgTotal = 4
-          }
-          Write-Host "✅ Found $imgTotal images in WIM"
-
-          Write-Host "🗜️ Converting WIM to ESD (Recovery compression)..."
-          for ($i=1; $i -le $imgTotal; $i++) {
-              Write-Host "📤 Exporting image $i/$imgTotal to ESD..."
-              dism /Export-Image `
-                  /SourceImageFile:$finalWim `
-                  /SourceIndex:$i `
-                  /DestinationImageFile:$finalEsd `
-                  /Compress:recovery `
-                  /CheckIntegrity
-              
-              if ($LASTEXITCODE -ne 0) { throw "❌ ESD export failed (image $i, code: $LASTEXITCODE)" }
-              Write-Host "✅ Image $i exported to ESD"
-          }
-
-          if (-not (Test-Path $finalEsd) -or (Get-Item $finalEsd).Length -lt 1024) {
-              throw "❌ Final ESD file is empty or missing"
-          }
-          $esdSize = [math]::Round((Get-Item $finalEsd).Length/1GB,2)
-          Write-Host "✅ ESD created successfully!"
-          Write-Host "📄 File: $finalEsd"
-          Write-Host "📏 Size: $esdSize GB"
-
-          Write-Host "🧹 Deleting source WIM file..."
-          Remove-Item -Path $finalWim -Force -ErrorAction SilentlyContinue
-          Write-Host "✅ WIM file deleted"
-
-      # 修复：拆分ESD上传提示和上传Action
-      - name: Show ESD Upload Info
-        shell: powershell
-        run: |
-          Write-Host "`n📤 Preparing to upload ESD to Artifact..."
-          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
-          $esdSize = [math]::Round((Get-Item $esdPath).Length/1GB,2)
-          Write-Host "File: $esdPath"
-          Write-Host "Size: $esdSize GB"
-          Write-Host "Artifact Name: windows7-target-esd"
-
-      - name: Upload ESD Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows7-target-esd
-          path: ${{ env.TARGET_ESD }}
-          retention-days: 90
-
-  split-esd:
-    needs: build-esd
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # 修复：拆分ESD下载提示和下载Action
-      - name: Show ESD Download Info
-        shell: powershell
-        run: |
-          Write-Host "📥 Preparing to download ESD Artifact..."
-          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
-          Write-Host "Expected ESD path: $esdPath"
-
-      - name: Download ESD Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: windows7-target-esd
-          path: ${{ github.workspace }}
-
-      - name: Verify ESD Download
-        shell: powershell
-        run: |
-          $esdPath = "${{ github.workspace }}\${{ env.TARGET_ESD }}"
-          if (-not (Test-Path $esdPath)) { throw "❌ ESD Artifact not found at $esdPath" }
-          $esdSize = [math]::Round((Get-Item $esdPath).Length/1GB,2)
-          Write-Host "✅ ESD downloaded: $esdPath ($esdSize GB)"
-
-      - name: Install 7-Zip
-        shell: powershell
-        run: |
-          $7zPath = "C:\Program Files\7-Zip\7z.exe"
-          if (-not (Test-Path $7zPath)) {
-              Write-Host "🔧 Installing 7-Zip..."
-              choco install 7zip -y --no-progress --ignore-checksums --force
-          }
-          if (-not (Test-Path $7zPath)) { throw "❌ 7-Zip installation failed" }
-          Write-Host "✅ 7-Zip installed: $7zPath"
-
-      - name: Split ESD to 1950M Volumes (Hardcoded)
-        shell: powershell
-        run: |
-          $esdFile = "$env:GITHUB_WORKSPACE\$env:TARGET_ESD"
-          $7zPath = "C:\Program Files\7-Zip\7z.exe"
-          $splitOutput = "$esdFile.7z"
-
-          if (-not (Test-Path $esdFile)) { throw "❌ ESD file not found: $esdFile" }
-
-          Write-Host "🗜️ Splitting ESD to 1950M volumes..."
-          Write-Host "Command: $7zPath a -y -mx=9 -v1950M ""$splitOutput"" ""$esdFile"""
-          & $7zPath a -y -mx=9 -v1950M "$splitOutput" "$esdFile"
-          
-          if ($LASTEXITCODE -ne 0) { throw "❌ 7z split failed (code: $LASTEXITCODE)" }
-
-          $splitFiles = Get-ChildItem -Path "$env:GITHUB_WORKSPACE" -Filter "$($env:TARGET_ESD).7z.*" | Sort-Object Name
-          if ($splitFiles.Count -eq 0) { throw "❌ No split files created" }
-          
-          Write-Host "✅ Split completed successfully!"
-          Write-Host "📊 Total volumes: $($splitFiles.Count)"
-          foreach ($file in $splitFiles) {
-              $fileSize = [math]::Round($file.Length/1GB,2)
-              Write-Host " - $($file.Name): $fileSize GB"
-          }
-
-          Write-Host "🧹 Deleting source ESD file..."
-          Remove-Item -Path $esdFile -Force -ErrorAction SilentlyContinue
-          Write-Host "✅ ESD file deleted"
-
-      # 修复：拆分分卷上传提示和上传Action
-      - name: Show Split Volumes Upload Info
-        shell: powershell
-        run: |
-          Write-Host "`n📤 Preparing to upload split volumes to Artifact..."
-          $splitFiles = Get-ChildItem -Path "${{ github.workspace }}" -Filter "${{ env.TARGET_ESD }}.7z.*"
-          Write-Host "✅ $($splitFiles.Count) volumes to upload"
-
-      - name: Upload Split Volumes
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows7-split-volumes
-          path: ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*
-          retention-days: 90
-
-  publish-release:
-    needs: split-esd
+  build:
     runs-on: windows-latest
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # 修复：拆分分卷下载提示和下载Action
-      - name: Show Split Volumes Download Info
-        shell: powershell
-        run: |
-          Write-Host "📥 Preparing to download split volumes..."
-          $splitPattern = "${{ env.TARGET_ESD }}.7z.*"
-          Write-Host "Expected pattern: $splitPattern"
-
-      - name: Download Split Volumes
-        uses: actions/download-artifact@v4
-        with:
-          name: windows7-split-volumes
-          path: ${{ github.workspace }}
-
-      - name: Verify Split Volumes
-        shell: powershell
-        run: |
-          $splitFiles = Get-ChildItem -Path "${{ github.workspace }}" -Filter "${{ env.TARGET_ESD }}.7z.*"
-          if ($splitFiles.Count -eq 0) { throw "❌ Split volumes not found" }
-          Write-Host "✅ $($splitFiles.Count) volumes downloaded successfully"
-
-      - name: Publish to GitHub Releases
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_TAG }}
-          files: ${{ github.workspace }}/${{ env.TARGET_ESD }}.7z.*
-          draft: false
-          prerelease: false
-          body: |
-            # Windows7_ULT&ENT_32&64
-            - Compressed ESD split into 1950M volumes
-            - Included images:
-              - Windows7x86ULTIMATE (Index 5)
-              - Windows7x86ENTERPRISE (Index 1)
-              - Windows7x64ULTIMATE (Index 4)
-              - Windows7x64ENTERPRISE (Index 1)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Final Cleanup
-        if: always()
-        shell: powershell
-        run: |
-          Write-Host "🧹 Final cleanup..."
-          $tempDirs = Get-ChildItem -Path $env:GITHUB_WORKSPACE -Filter "temp_*" -Directory
-          foreach ($dir in $tempDirs) {
-              Remove-Item -Path $dir.FullName -Recurse -Force -ErrorAction SilentlyContinue
-          }
-          Write-Host "✅ All temp files cleaned!"
-          Write-Host "🎉 Workflow completed successfully!"
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup 7-Zip
+      run: |
+        choco install 7zip -y
+        echo "C:\Program Files\7-Zip" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        
+    - name: Create working directory
+      run: |
+        mkdir workdir
+        cd workdir
+        
+    # Process Windows 7 x86 Ultimate (第5个映象)
+    - name: Download Windows 7 x86 Ultimate part 1
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x86ULTIMATE-26.1.15.7z.001 ${{ env.WIN7_X86_ULTIMATE_URL_001 }}
+        
+    - name: Download Windows 7 x86 Ultimate part 2
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x86ULTIMATE-26.1.15.7z.002 ${{ env.WIN7_X86_ULTIMATE_URL_002 }}
+        
+    - name: Download Windows 7 x86 Ultimate part 3
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x86ULTIMATE-26.1.15.7z.003 ${{ env.WIN7_X86_ULTIMATE_URL_003 }}
+        
+    - name: Extract Windows 7 x86 Ultimate archive
+      run: |
+        cd workdir
+        7z x install_Windows7x86ULTIMATE-26.1.15.7z.001 -owin7_x86_ultimate
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract Windows 7 x86 Ultimate archive"
+        }
+        
+    - name: Find and process WIM file for x86 Ultimate
+      run: |
+        cd workdir\win7_x86_ultimate
+        $wimFile = Get-ChildItem -Path . -Filter "*.wim" -Recurse | Select-Object -First 1
+        if ($wimFile -and (Test-Path $wimFile.FullName)) {
+            Write-Host "Found WIM file: $($wimFile.Name)"
+            
+            # Export fifth image to new WIM file (第5个映象)
+            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:5 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x86 Ultimate" /Compress:max
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to export WIM image for x86 Ultimate"
+            }
+            Write-Host "Successfully created initial WIM file with x86 Ultimate"
+        } else {
+            throw "No WIM file found in x86 Ultimate archive"
+        }
+        
+    - name: Cleanup Windows 7 x86 Ultimate temporary files
+      run: |
+        cd workdir
+        Remove-Item install_Windows7x86ULTIMATE-26.1.15.7z.001 -Force
+        Remove-Item install_Windows7x86ULTIMATE-26.1.15.7z.002 -Force
+        Remove-Item install_Windows7x86ULTIMATE-26.1.15.7z.003 -Force
+        Remove-Item win7_x86_ultimate -Recurse -Force
+        
+    # Process Windows 7 x86 Enterprise (第1个映象)
+    - name: Download Windows 7 x86 Enterprise part 1
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x86ENTERPRISE-26.1.15.7z.001 ${{ env.WIN7_X86_ENTERPRISE_URL_001 }}
+        
+    - name: Download Windows 7 x86 Enterprise part 2
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x86ENTERPRISE-26.1.15.7z.002 ${{ env.WIN7_X86_ENTERPRISE_URL_002 }}
+        
+    - name: Extract Windows 7 x86 Enterprise archive
+      run: |
+        cd workdir
+        7z x install_Windows7x86ENTERPRISE-26.1.15.7z.001 -owin7_x86_enterprise
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract Windows 7 x86 Enterprise archive"
+        }
+        
+    - name: Find and append WIM file for x86 Enterprise
+      run: |
+        cd workdir\win7_x86_enterprise
+        $wimFile = Get-ChildItem -Path . -Filter "*.wim" -Recurse | Select-Object -First 1
+        if ($wimFile -and (Test-Path $wimFile.FullName)) {
+            Write-Host "Found WIM file: $($wimFile.Name)"
+            
+            # Export first image and append to existing WIM file (第1个映象)
+            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x86 Enterprise" /Compress:max
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to append WIM image for x86 Enterprise"
+            }
+            Write-Host "Successfully appended x86 Enterprise image"
+        } else {
+            throw "No WIM file found in x86 Enterprise archive"
+        }
+        
+    - name: Cleanup Windows 7 x86 Enterprise temporary files
+      run: |
+        cd workdir
+        Remove-Item install_Windows7x86ENTERPRISE-26.1.15.7z.001 -Force
+        Remove-Item install_Windows7x86ENTERPRISE-26.1.15.7z.002 -Force
+        Remove-Item win7_x86_enterprise -Recurse -Force
+        
+    # Process Windows 7 x64 Ultimate (第4个映象)
+    - name: Download Windows 7 x64 Ultimate part 1
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x64ULTIMATE-26.1.15.7z.001 ${{ env.WIN7_X64_ULTIMATE_URL_001 }}
+        
+    - name: Download Windows 7 x64 Ultimate part 2
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x64ULTIMATE-26.1.15.7z.002 ${{ env.WIN7_X64_ULTIMATE_URL_002 }}
+        
+    - name: Download Windows 7 x64 Ultimate part 3
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x64ULTIMATE-26.1.15.7z.003 ${{ env.WIN7_X64_ULTIMATE_URL_003 }}
+        
+    - name: Extract Windows 7 x64 Ultimate archive
+      run: |
+        cd workdir
+        7z x install_Windows7x64ULTIMATE-26.1.15.7z.001 -owin7_x64_ultimate
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract Windows 7 x64 Ultimate archive"
+        }
+        
+    - name: Find and append WIM file for x64 Ultimate
+      run: |
+        cd workdir\win7_x64_ultimate
+        $wimFile = Get-ChildItem -Path . -Filter "*.wim" -Recurse | Select-Object -First 1
+        if ($wimFile -and (Test-Path $wimFile.FullName)) {
+            Write-Host "Found WIM file: $($wimFile.Name)"
+            
+            # Export fourth image and append to existing WIM file (第4个映象)
+            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:4 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x64 Ultimate" /Compress:max
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to append WIM image for x64 Ultimate"
+            }
+            Write-Host "Successfully appended x64 Ultimate image"
+        } else {
+            throw "No WIM file found in x64 Ultimate archive"
+        }
+        
+    - name: Cleanup Windows 7 x64 Ultimate temporary files
+      run: |
+        cd workdir
+        Remove-Item install_Windows7x64ULTIMATE-26.1.15.7z.001 -Force
+        Remove-Item install_Windows7x64ULTIMATE-26.1.15.7z.002 -Force
+        Remove-Item install_Windows7x64ULTIMATE-26.1.15.7z.003 -Force
+        Remove-Item win7_x64_ultimate -Recurse -Force
+        
+    # Process Windows 7 x64 Enterprise (第1个映象)
+    - name: Download Windows 7 x64 Enterprise part 1
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x64ENTERPRISE-26.1.15.7z.001 ${{ env.WIN7_X64_ENTERPRISE_URL_001 }}
+        
+    - name: Download Windows 7 x64 Enterprise part 2
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x64ENTERPRISE-26.1.15.7z.002 ${{ env.WIN7_X64_ENTERPRISE_URL_002 }}
+        
+    - name: Download Windows 7 x64 Enterprise part 3
+      run: |
+        cd workdir
+        curl -L -o install_Windows7x64ENTERPRISE-26.1.15.7z.003 ${{ env.WIN7_X64_ENTERPRISE_URL_003 }}
+        
+    - name: Extract Windows 7 x64 Enterprise archive
+      run: |
+        cd workdir
+        7z x install_Windows7x64ENTERPRISE-26.1.15.7z.001 -owin7_x64_enterprise
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to extract Windows 7 x64 Enterprise archive"
+        }
+        
+    - name: Find and append WIM file for x64 Enterprise
+      run: |
+        cd workdir\win7_x64_enterprise
+        $wimFile = Get-ChildItem -Path . -Filter "*.wim" -Recurse | Select-Object -First 1
+        if ($wimFile -and (Test-Path $wimFile.FullName)) {
+            Write-Host "Found WIM file: $($wimFile.Name)"
+            
+            # Export first image and append to existing WIM file (第1个映象)
+            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x64 Enterprise" /Compress:max
+            if ($LASTEXITCODE -ne 0) {
+                throw "Failed to append WIM image for x64 Enterprise"
+            }
+            Write-Host "Successfully appended x64 Enterprise image"
+        } else {
+            throw "No WIM file found in x64 Enterprise archive"
+        }
+        
+    - name: Cleanup Windows 7 x64 Enterprise temporary files
+      run: |
+        cd workdir
+        Remove-Item install_Windows7x64ENTERPRISE-26.1.15.7z.001 -Force
+        Remove-Item install_Windows7x64ENTERPRISE-26.1.15.7z.002 -Force
+        Remove-Item install_Windows7x64ENTERPRISE-26.1.15.7z.003 -Force
+        Remove-Item win7_x64_enterprise -Recurse -Force
+        
+    # Convert final WIM to ESD
+    - name: Convert WIM to ESD with maximum compression
+      run: |
+        cd workdir
+        # Verify source WIM file exists
+        $wimFile = Get-ChildItem -Path "$pwd" -Filter "Windows7_ULT_ENT_32_64.wim" -Recurse | Select-Object -First 1
+        if (-not $wimFile -or -not (Test-Path $wimFile.FullName)) {
+            throw "Source WIM file not found"
+        }
+        
+        Write-Host "Converting WIM to ESD with maximum compression..."
+        $esdFile = Join-Path $pwd "Windows7_ULT_ENT_32_64.esd"
+        dism /Export-Image /SourceImageFile:$($wimFile.FullName) /SourceIndex:* /DestinationImageFile:$esdFile /Compress:recovery
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to convert WIM to ESD"
+        }
+        
+        # Verify ESD file was created
+        if (Test-Path $esdFile) {
+            Write-Host "Successfully converted to ESD format"
+            $esdSize = (Get-Item $esdFile).Length
+            Write-Host "ESD file size: $($esdSize / 1GB) GB"
+        } else {
+            throw "ESD file was not created"
+        }
+        
+    - name: Split ESD file into 1950MB volumes
+      run: |
+        cd workdir
+        # Verify ESD file exists before splitting
+        $esdFile = Join-Path $pwd "Windows7_ULT_ENT_32_64.esd"
+        if (-not (Test-Path $esdFile)) {
+            throw "ESD file not found for splitting"
+        }
+        
+        Write-Host "Splitting ESD file into 1950MB volumes..."
+        $outputArchive = "Windows7_ULT_ENT_32_64.7z"
+        7z a -v1950M $outputArchive $esdFile
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to split ESD file"
+        }
+        
+        Write-Host "Verifying split archive integrity..."
+        7z t $outputArchive.001
+        if ($LASTEXITCODE -ne 0) {
+            throw "Split archive integrity check failed"
+        }
+        
+        # Verify split files were created
+        $splitFiles = Get-ChildItem -Path . -Filter "Windows7_ULT_ENT_32_64.7z.*"
+        if ($splitFiles -and $splitFiles.Count -gt 0) {
+            Write-Host "Created $($splitFiles.Count) volume files:"
+            foreach ($file in $splitFiles) {
+                Write-Host "  $($file.Name) - $($file.Length / 1MB) MB"
+            }
+        } else {
+            throw "No split volume files were created"
+        }
+        
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        name: Windows7_ULT_ENT_32_64
+        tag_name: Windows7_ULT_ENT_32_64
+        files: |
+          workdir/Windows7_ULT_ENT_32_64.7z.*
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

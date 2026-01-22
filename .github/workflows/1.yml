@@ -1,54 +1,39 @@
-name: Test Delete Release
-
-"on":
-  workflow_dispatch:
-    inputs:
-      release_name:
-        description: 'Release name to delete'
-        required: true
-        default: 'Windows10_LTSC_2021_32&64_Windows_11_LTSC_2025'
-
-jobs:
-  test-delete:
-    runs-on: windows-latest
-    steps:
-    - name: Test deleting release and tag
-      run: |
-        $releaseName = "${{ github.event.inputs.release_name }}"
-        
-        Write-Host "Testing deletion of release: $releaseName"
-        
-        # Check if release exists and delete it
-        $releaseExists = gh release view "$releaseName" --json id --jq ".id" 2>$null
-        $exitCode = $LASTEXITCODE
-        if ($exitCode -eq 0) {
-            Write-Host "Release $releaseName exists, attempting to delete..."
-            try {
-                gh release delete "$releaseName" --cleanup-tag --yes
-                Write-Host "Successfully deleted release $releaseName"
-            } catch {
-                Write-Host "Failed to delete release: $_"
-            }
+# Delete existing release and tag if they exist
+- name: Delete existing release and tag
+  shell: pwsh  # 明确指定PowerShell Shell，匹配脚本语法
+  run: |
+    # 定义目标名称（统一管理，避免重复书写，方便后续修改）
+    $targetName = "Windows7_ULT&ENT_32&64"
+    
+    # ===== 1. 检查并删除Release =====
+    try {
+        # 用双引号包裹含特殊字符的名称，重定向错误输出避免冗余报错
+        $releaseId = gh release view "$targetName" --json id --jq ".id" 2>&1
+        # 通过gh命令的退出码判断Release是否存在（最可靠的方式）
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Found existing release: $targetName, deleting..."
+            gh release delete "$targetName" --cleanup-tag --yes  # --cleanup-tag会同步删除关联Tag
         } else {
-            Write-Host "Release $releaseName does not exist, nothing to delete"
+            Write-Host "No existing release found for: $targetName"
         }
-        
-        # Check if tag exists and delete it
-        $tagExists = git ls-remote --tags origin "$releaseName" 2>$null
-        $gitExitCode = $LASTEXITCODE
-        if ($gitExitCode -eq 0 -and $tagExists) {
-            Write-Host "Tag $releaseName exists, attempting to delete..."
-            try {
-                git push origin --delete refs/tags/"$releaseName"
-                Write-Host "Successfully deleted tag $releaseName"
-            } catch {
-                Write-Host "Failed to delete tag: $_"
-            }
+    }
+    catch {
+        Write-Host "No existing release found for: $targetName (error: $_)"
+    }
+
+    # ===== 2. 兜底检查并删除Tag（防止--cleanup-tag未生效） =====
+    try {
+        # 用双引号包裹标签名，指定refs/tags完整路径
+        git ls-remote --tags origin "refs/tags/$targetName" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Found existing tag: $targetName, deleting..."
+            git push origin --delete "refs/tags/$targetName"
         } else {
-            Write-Host "Tag $releaseName does not exist, nothing to delete"
+            Write-Host "No existing tag found for: $targetName"
         }
-        
-        # Exit with success code
-        exit 0
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    }
+    catch {
+        Write-Host "No existing tag found for: $targetName (error: $_)"
+    }
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 统一使用GITHUB_TOKEN（gh命令兼容此变量）

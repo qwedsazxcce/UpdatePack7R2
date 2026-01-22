@@ -262,7 +262,28 @@ jobs:
         $esdFile = "Windows7_ULT_ENT_32_64.esd"
         # Ensure full path is used for both source and destination
         $sourcePath = Resolve-Path $wimFile.FullName
-        dism /Export-Image /SourceImageFile:"$sourcePath" /SourceAll /DestinationImageFile:"$esdFile" /Compress:recovery
+        # Ensure full path is used for both source and destination
+        $sourcePath = Resolve-Path $wimFile.FullName
+        # Export all images from WIM to ESD in one operation
+        # Since /SourceIndex:ALL is not valid, we'll export all by using a loop
+        # First get the WIM information to know how many images there are
+        $wimInfo = dism /Get-WimInfo /WimFile:"$sourcePath" /Format:List
+        $imageCount = [regex]::Matches($wimInfo, "Index : \d+").Count
+        
+        if ($imageCount -gt 0) {
+            # Export first image to create the ESD file
+            dism /Export-Image /SourceImageFile:"$sourcePath" /SourceIndex:1 /DestinationImageFile:"$esdFile" /Compress:recovery
+            
+            # Export remaining images to append to the same ESD file
+            for ($i = 2; $i -le $imageCount; $i++) {
+                dism /Export-Image /SourceImageFile:"$sourcePath" /SourceIndex:$i /DestinationImageFile:"$esdFile" /Compress:recovery
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host "Warning: Failed to export image index $i, continuing..."
+                }
+            }
+        } else {
+            throw "No images found in WIM file to export"
+        }
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to convert WIM to ESD"
         }

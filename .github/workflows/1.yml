@@ -20,7 +20,8 @@ jobs:
         
         # Check if release exists and delete it
         $releaseExists = gh release view "$releaseName" --json id --jq ".id" 2>$null
-        if ($releaseExists) {
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -eq 0) {
             Write-Host "Release $releaseName exists, attempting to delete..."
             try {
                 gh release delete "$releaseName" --cleanup-tag --yes
@@ -34,7 +35,8 @@ jobs:
         
         # Check if tag exists and delete it
         $tagExists = git ls-remote --tags origin "$releaseName" 2>$null
-        if ($tagExists) {
+        $gitExitCode = $LASTEXITCODE
+        if ($gitExitCode -eq 0 -and $tagExists) {
             Write-Host "Tag $releaseName exists, attempting to delete..."
             try {
                 git push origin --delete refs/tags/"$releaseName"
@@ -45,5 +47,8 @@ jobs:
         } else {
             Write-Host "Tag $releaseName does not exist, nothing to delete"
         }
+        
+        # Exit with success code
+        exit 0
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -130,7 +130,7 @@ jobs:
         echo "repo_name=$name" >> $env:GITHUB_OUTPUT
       shell: pwsh
       
-    - name: Delete existing release assets
+    - name: Delete existing release completely
       run: |
         $repoOwner = "${{ steps.repo_info.outputs.repo_owner }}"
         $repoName = "${{ steps.repo_info.outputs.repo_name }}"
@@ -144,28 +144,24 @@ jobs:
             $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/$repoOwner/$repoName/releases/tags/${{ env.RELEASE_TAG }}" -Headers @{
                 Authorization = "Bearer $token"
             }
-            Write-Host "Found existing release"
+            Write-Host "Found existing release with ID: $($releaseInfo.id)"
+            
+            # Delete the entire release
+            Write-Host "Deleting entire release..."
+            try {
+                Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repoOwner/$repoName/releases/$($releaseInfo.id)" -Headers @{
+                    Authorization = "Bearer $token"
+                }
+                Write-Host "Successfully deleted release: ${{ env.RELEASE_TAG }}"
+            } catch {
+                Write-Warning "Could not delete release: $($_.Exception.Message)"
+            }
         } catch {
             Write-Host "Release not found, will create new one"
-            $releaseInfo = $null
         }
         
-        # Delete existing assets that match our pattern
-        if ($releaseInfo -and $releaseInfo.assets) {
-            foreach ($asset in $releaseInfo.assets) {
-                if ($asset.name -match "Windows7_ULT&ENT_32&64.7z.") {
-                    Write-Host "Deleting asset: $($asset.name)"
-                    try {
-                        Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/$repoOwner/$repoName/releases/assets/$($asset.id)" -Headers @{
-                            Authorization = "Bearer $token"
-                        }
-                        Write-Host "Successfully deleted $($asset.name)"
-                    } catch {
-                        Write-Host "Could not delete asset $($asset.name): $($_.Exception.Message)"
-                    }
-                }
-            }
-        }
+        # Wait a moment to ensure deletion is complete
+        Start-Sleep -Seconds 3
       shell: pwsh
       continue-on-error: true
       
@@ -186,7 +182,7 @@ jobs:
         }
       shell: pwsh
       
-    - name: Upload release assets
+    - name: Create or update release with assets
       uses: softprops/action-gh-release@v1
       with:
         name: ${{ env.RELEASE_NAME }}
@@ -194,7 +190,7 @@ jobs:
         draft: false
         prerelease: false
         generate_release_notes: false
-        overwrite: true
+        fail_on_unmatched_files: false
         files: |
           ${{ env.FILES_LIST }}
       env:

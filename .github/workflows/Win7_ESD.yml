@@ -42,22 +42,22 @@ jobs:
     - name: Download Windows 7 x86 Ultimate part 1
       run: |
         cd workdir
-        curl -L -o install_Windows7x86ULTIMATE-26.1.15.7z.001 ${{ env.WIN7_X86_ULTIMATE_URL_001 }}
+        curl -L -o install_Windows7x86ULTIMATE.7z.001 ${{ env.WIN7_X86_ULTIMATE_URL_001 }}
         
     - name: Download Windows 7 x86 Ultimate part 2
       run: |
         cd workdir
-        curl -L -o install_Windows7x86ULTIMATE-26.1.15.7z.002 ${{ env.WIN7_X86_ULTIMATE_URL_002 }}
+        curl -L -o install_Windows7x86ULTIMATE.7z.002 ${{ env.WIN7_X86_ULTIMATE_URL_002 }}
         
     - name: Download Windows 7 x86 Ultimate part 3
       run: |
         cd workdir
-        curl -L -o install_Windows7x86ULTIMATE-26.1.15.7z.003 ${{ env.WIN7_X86_ULTIMATE_URL_003 }}
+        curl -L -o install_Windows7x86ULTIMATE.7z.003 ${{ env.WIN7_X86_ULTIMATE_URL_003 }}
         
     - name: Extract Windows 7 x86 Ultimate archive
       run: |
         cd workdir
-        7z x install_Windows7x86ULTIMATE-26.1.15.7z.001 -owin7_x86_ultimate
+        7z x install_Windows7x86ULTIMATE.7z.001 -owin7_x86_ultimate
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to extract Windows 7 x86 Ultimate archive"
         }
@@ -70,7 +70,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export fifth image to new WIM file (第5个映象)
-            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:5 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x86 Ultimate" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to export WIM image for x86 Ultimate"
@@ -83,26 +83,26 @@ jobs:
     - name: Cleanup Windows 7 x86 Ultimate temporary files
       run: |
         cd workdir
-        Remove-Item install_Windows7x86ULTIMATE-26.1.15.7z.001 -Force
-        Remove-Item install_Windows7x86ULTIMATE-26.1.15.7z.002 -Force
-        Remove-Item install_Windows7x86ULTIMATE-26.1.15.7z.003 -Force
+        Remove-Item install_Windows7x86ULTIMATE.7z.001 -Force
+        Remove-Item install_Windows7x86ULTIMATE.7z.002 -Force
+        Remove-Item install_Windows7x86ULTIMATE.7z.003 -Force
         Remove-Item win7_x86_ultimate -Recurse -Force
         
     # Process Windows 7 x86 Enterprise (第1个映象)
     - name: Download Windows 7 x86 Enterprise part 1
       run: |
         cd workdir
-        curl -L -o install_Windows7x86ENTERPRISE-26.1.15.7z.001 ${{ env.WIN7_X86_ENTERPRISE_URL_001 }}
+        curl -L -o install_Windows7x86ENTERPRISE.7z.001 ${{ env.WIN7_X86_ENTERPRISE_URL_001 }}
         
     - name: Download Windows 7 x86 Enterprise part 2
       run: |
         cd workdir
-        curl -L -o install_Windows7x86ENTERPRISE-26.1.15.7z.002 ${{ env.WIN7_X86_ENTERPRISE_URL_002 }}
+        curl -L -o install_Windows7x86ENTERPRISE.7z.002 ${{ env.WIN7_X86_ENTERPRISE_URL_002 }}
         
     - name: Extract Windows 7 x86 Enterprise archive
       run: |
         cd workdir
-        7z x install_Windows7x86ENTERPRISE-26.1.15.7z.001 -owin7_x86_enterprise
+        7z x install_Windows7x86ENTERPRISE.7z.001 -owin7_x86_enterprise
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to extract Windows 7 x86 Enterprise archive"
         }
@@ -115,7 +115,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export first image and append to existing WIM file (第1个映象)
-            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x86 Enterprise" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to append WIM image for x86 Enterprise"
@@ -128,30 +128,30 @@ jobs:
     - name: Cleanup Windows 7 x86 Enterprise temporary files
       run: |
         cd workdir
-        Remove-Item install_Windows7x86ENTERPRISE-26.1.15.7z.001 -Force
-        Remove-Item install_Windows7x86ENTERPRISE-26.1.15.7z.002 -Force
+        Remove-Item install_Windows7x86ENTERPRISE.7z.001 -Force
+        Remove-Item install_Windows7x86ENTERPRISE.7z.002 -Force
         Remove-Item win7_x86_enterprise -Recurse -Force
         
     # Process Windows 7 x64 Ultimate (第4个映象)
     - name: Download Windows 7 x64 Ultimate part 1
       run: |
         cd workdir
-        curl -L -o install_Windows7x64ULTIMATE-26.1.15.7z.001 ${{ env.WIN7_X64_ULTIMATE_URL_001 }}
+        curl -L -o install_Windows7x64ULTIMATE.7z.001 ${{ env.WIN7_X64_ULTIMATE_URL_001 }}
         
     - name: Download Windows 7 x64 Ultimate part 2
       run: |
         cd workdir
-        curl -L -o install_Windows7x64ULTIMATE-26.1.15.7z.002 ${{ env.WIN7_X64_ULTIMATE_URL_002 }}
+        curl -L -o install_Windows7x64ULTIMATE.7z.002 ${{ env.WIN7_X64_ULTIMATE_URL_002 }}
         
     - name: Download Windows 7 x64 Ultimate part 3
       run: |
         cd workdir
-        curl -L -o install_Windows7x64ULTIMATE-26.1.15.7z.003 ${{ env.WIN7_X64_ULTIMATE_URL_003 }}
+        curl -L -o install_Windows7x64ULTIMATE.7z.003 ${{ env.WIN7_X64_ULTIMATE_URL_003 }}
         
     - name: Extract Windows 7 x64 Ultimate archive
       run: |
         cd workdir
-        7z x install_Windows7x64ULTIMATE-26.1.15.7z.001 -owin7_x64_ultimate
+        7z x install_Windows7x64ULTIMATE.7z.001 -owin7_x64_ultimate
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to extract Windows 7 x64 Ultimate archive"
         }
@@ -164,7 +164,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export fourth image and append to existing WIM file (第4个映象)
-            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:4 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x64 Ultimate" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to append WIM image for x64 Ultimate"
@@ -177,31 +177,31 @@ jobs:
     - name: Cleanup Windows 7 x64 Ultimate temporary files
       run: |
         cd workdir
-        Remove-Item install_Windows7x64ULTIMATE-26.1.15.7z.001 -Force
-        Remove-Item install_Windows7x64ULTIMATE-26.1.15.7z.002 -Force
-        Remove-Item install_Windows7x64ULTIMATE-26.1.15.7z.003 -Force
+        Remove-Item install_Windows7x64ULTIMATE.7z.001 -Force
+        Remove-Item install_Windows7x64ULTIMATE.7z.002 -Force
+        Remove-Item install_Windows7x64ULTIMATE.7z.003 -Force
         Remove-Item win7_x64_ultimate -Recurse -Force
         
     # Process Windows 7 x64 Enterprise (第1个映象)
     - name: Download Windows 7 x64 Enterprise part 1
       run: |
         cd workdir
-        curl -L -o install_Windows7x64ENTERPRISE-26.1.15.7z.001 ${{ env.WIN7_X64_ENTERPRISE_URL_001 }}
+        curl -L -o install_Windows7x64ENTERPRISE.7z.001 ${{ env.WIN7_X64_ENTERPRISE_URL_001 }}
         
     - name: Download Windows 7 x64 Enterprise part 2
       run: |
         cd workdir
-        curl -L -o install_Windows7x64ENTERPRISE-26.1.15.7z.002 ${{ env.WIN7_X64_ENTERPRISE_URL_002 }}
+        curl -L -o install_Windows7x64ENTERPRISE.7z.002 ${{ env.WIN7_X64_ENTERPRISE_URL_002 }}
         
     - name: Download Windows 7 x64 Enterprise part 3
       run: |
         cd workdir
-        curl -L -o install_Windows7x64ENTERPRISE-26.1.15.7z.003 ${{ env.WIN7_X64_ENTERPRISE_URL_003 }}
+        curl -L -o install_Windows7x64ENTERPRISE.7z.003 ${{ env.WIN7_X64_ENTERPRISE_URL_003 }}
         
     - name: Extract Windows 7 x64 Enterprise archive
       run: |
         cd workdir
-        7z x install_Windows7x64ENTERPRISE-26.1.15.7z.001 -owin7_x64_enterprise
+        7z x install_Windows7x64ENTERPRISE.7z.001 -owin7_x64_enterprise
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to extract Windows 7 x64 Enterprise archive"
         }
@@ -214,7 +214,7 @@ jobs:
             Write-Host "Found WIM file: $($wimFile.Name)"
             
             # Export first image and append to existing WIM file (第1个映象)
-            $destWim = Join-Path $pwd "..\..\Windows7_ULT_ENT_32_64.wim"
+            $destWim = "..\..\Windows7_ULT_ENT_32_64.wim"
             dism /Export-Image /SourceImageFile:"$($wimFile.FullName)" /SourceIndex:1 /DestinationImageFile:$destWim /DestinationName:"Windows 7 x64 Enterprise" /Compress:max
             if ($LASTEXITCODE -ne 0) {
                 throw "Failed to append WIM image for x64 Enterprise"
@@ -227,9 +227,9 @@ jobs:
     - name: Cleanup Windows 7 x64 Enterprise temporary files
       run: |
         cd workdir
-        Remove-Item install_Windows7x64ENTERPRISE-26.1.15.7z.001 -Force
-        Remove-Item install_Windows7x64ENTERPRISE-26.1.15.7z.002 -Force
-        Remove-Item install_Windows7x64ENTERPRISE-26.1.15.7z.003 -Force
+        Remove-Item install_Windows7x64ENTERPRISE.7z.001 -Force
+        Remove-Item install_Windows7x64ENTERPRISE.7z.002 -Force
+        Remove-Item install_Windows7x64ENTERPRISE.7z.003 -Force
         Remove-Item win7_x64_enterprise -Recurse -Force
         
     # Convert final WIM to ESD
@@ -237,13 +237,13 @@ jobs:
       run: |
         cd workdir
         # Verify source WIM file exists
-        $wimFile = Get-ChildItem -Path "$pwd" -Filter "Windows7_ULT_ENT_32_64.wim" -Recurse | Select-Object -First 1
+        $wimFile = Get-ChildItem -Path . -Filter "Windows7_ULT_ENT_32_64.wim" | Select-Object -First 1
         if (-not $wimFile -or -not (Test-Path $wimFile.FullName)) {
             throw "Source WIM file not found"
         }
         
         Write-Host "Converting WIM to ESD with maximum compression..."
-        $esdFile = Join-Path $pwd "Windows7_ULT_ENT_32_64.esd"
+        $esdFile = "Windows7_ULT_ENT_32_64.esd"
         dism /Export-Image /SourceImageFile:$($wimFile.FullName) /SourceIndex:* /DestinationImageFile:$esdFile /Compress:recovery
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to convert WIM to ESD"
@@ -262,7 +262,7 @@ jobs:
       run: |
         cd workdir
         # Verify ESD file exists before splitting
-        $esdFile = Join-Path $pwd "Windows7_ULT_ENT_32_64.esd"
+        $esdFile = "Windows7_ULT_ENT_32_64.esd"
         if (-not (Test-Path $esdFile)) {
             throw "ESD file not found for splitting"
         }

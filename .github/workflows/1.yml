@@ -168,16 +168,34 @@ jobs:
     - name: Prepare release assets list
       run: |
         cd workdir
-        $files = Get-ChildItem -Path . -Filter "Windows7_ULT&ENT_32&64.7z.*" | ForEach-Object { "workdir/$($_.Name)" }
-        if ($files) {
-            $filesList = $files -join "`n"
+        # 明确指定要上传的文件名，确保与环境变量一致
+        $files = @(
+          "workdir/${{ env.TARGET_FILE_1 }}",
+          "workdir/${{ env.TARGET_FILE_2 }}"
+        )
+        
+        # 验证文件是否存在
+        $validFiles = @()
+        foreach ($file in $files) {
+          $actualPath = $file -replace "workdir/", ""
+          if (Test-Path $actualPath) {
+            $validFiles += $file
+            Write-Host "✓ Found file: $actualPath"
+          } else {
+            Write-Warning "✗ File not found: $actualPath"
+          }
+        }
+        
+        if ($validFiles.Count -gt 0) {
+            $filesList = $validFiles -join "`n"
             Write-Host "Files to upload:"
             Write-Host $filesList
             echo "FILES_LIST<<EOF" >> $env:GITHUB_ENV
             echo "$filesList" >> $env:GITHUB_ENV
             echo "EOF" >> $env:GITHUB_ENV
         } else {
-            Write-Error "No split files found!"
+            Write-Error "No valid files found for upload!"
+            Get-ChildItem -Path . | ForEach-Object { Write-Host "Available files: $($_.Name)" }
             exit 1
         }
       shell: pwsh

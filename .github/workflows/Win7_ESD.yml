@@ -236,10 +236,26 @@ jobs:
     - name: Convert WIM to ESD with maximum compression
       run: |
         cd workdir
+        
         # Verify source WIM file exists
-        $wimFile = Get-ChildItem -Path . -Filter "Windows7_ULT_ENT_32_64.wim" | Select-Object -First 1
-        if (-not $wimFile -or -not (Test-Path $wimFile.FullName)) {
-            throw "Source WIM file not found"
+        $wimPath = "Windows7_ULT_ENT_32_64.wim"
+        if (Test-Path $wimPath) {
+            Write-Host "Found WIM file: $wimPath"
+            $wimFile = Get-Item $wimPath
+        } else {
+            Write-Host "Looking for WIM file in parent directory..."
+            $wimPath = "..\\Windows7_ULT_ENT_32_64.wim"
+            if (Test-Path $wimPath) {
+                Write-Host "Found WIM file: $wimPath"
+                $wimFile = Get-Item $wimPath
+            } else {
+                # Check all subdirectories
+                $wimFile = Get-ChildItem -Path .. -Filter "Windows7_ULT_ENT_32_64.wim" -Recurse | Select-Object -First 1
+                if (-not $wimFile) {
+                    Write-Host "WIM files in workdir: $(Get-ChildItem -Path . -Filter "*.wim" -Recurse)"
+                    throw "Source WIM file not found"
+                }
+            }
         }
         
         Write-Host "Converting WIM to ESD with maximum compression..."
@@ -261,9 +277,13 @@ jobs:
     - name: Split ESD file into 1950MB volumes
       run: |
         cd workdir
+        
         # Verify ESD file exists before splitting
         $esdFile = "Windows7_ULT_ENT_32_64.esd"
-        if (-not (Test-Path $esdFile)) {
+        if (Test-Path $esdFile) {
+            Write-Host "Found ESD file: $esdFile"
+        } else {
+            Write-Host "ESD file not found in current directory. Available files: $(Get-ChildItem -Path . -Filter "*.esd")"
             throw "ESD file not found for splitting"
         }
         

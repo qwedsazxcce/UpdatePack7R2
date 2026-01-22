@@ -339,7 +339,11 @@ jobs:
       with:
         name: Windows7_ULT&ENT_32&64
         tag_name: Windows7_ULT&ENT_32&64
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+        overwrite: true
         files: |
-          workdir/"Windows7_ULT&ENT_32&64.7z.*"
+          workdir/*.7z.*
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

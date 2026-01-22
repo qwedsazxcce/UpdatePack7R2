@@ -341,39 +341,57 @@ jobs:
             throw "No split volume files were created"
         }
         
-    # Delete existing release and tag if they exist
-    - name: Delete existing release and tag
-      run: |
-        # Check if release exists and delete it
-        $releaseExists = gh release view Windows7_ULT&ENT_32&64 --json id --jq ".id" 2>$null
-        if ($releaseExists) {
-            Write-Host "Deleting existing release Windows7_ULT&ENT_32&64"
-            gh release delete Windows7_ULT&ENT_32&64 --cleanup-tag --yes
+# Delete existing release and tag if they exist
+- name: Delete existing release and tag
+  shell: pwsh  # 明确指定PowerShell Shell，匹配脚本语法
+  run: |
+    # 定义目标名称（统一管理，避免重复书写，方便后续修改）
+    $targetName = "Windows7_ULT&ENT_32&64"
+    
+    # ===== 1. 检查并删除Release =====
+    try {
+        # 用双引号包裹含特殊字符的名称，重定向错误输出避免冗余报错
+        $releaseId = gh release view "$targetName" --json id --jq ".id" 2>&1
+        # 通过gh命令的退出码判断Release是否存在（最可靠的方式）
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Found existing release: $targetName, deleting..."
+            gh release delete "$targetName" --cleanup-tag --yes  # --cleanup-tag会同步删除关联Tag
         } else {
-            Write-Host "No existing release found, proceeding..."
+            Write-Host "No existing release found for: $targetName"
         }
-        
-        # Check if tag exists and delete it
-        $tagExists = git ls-remote --tags origin Windows7_ULT&ENT_32&64 2>$null
-        if ($tagExists) {
-            Write-Host "Deleting existing tag Windows7_ULT&ENT_32&64"
-            git push origin --delete refs/tags/Windows7_ULT&ENT_32&64
+    }
+    catch {
+        Write-Host "No existing release found for: $targetName (error: $_)"
+    }
+
+    # ===== 2. 兜底检查并删除Tag（防止--cleanup-tag未生效） =====
+    try {
+        # 用双引号包裹标签名，指定refs/tags完整路径
+        git ls-remote --tags origin "refs/tags/$targetName" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Found existing tag: $targetName, deleting..."
+            git push origin --delete "refs/tags/$targetName"
         } else {
-            Write-Host "No existing tag found, proceeding..."
+            Write-Host "No existing tag found for: $targetName"
         }
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Upload release assets
-      uses: softprops/action-gh-release@v1
-      with:
-        name: Windows7_ULT&ENT_32&64
-        tag_name: Windows7_ULT&ENT_32&64
-        draft: false
-        prerelease: false
-        generate_release_notes: false
-        overwrite: false  # Now set to false since we've already deleted the previous release
-        files: |
-          workdir/*.7z.*
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    }
+    catch {
+        Write-Host "No existing tag found for: $targetName (error: $_)"
+    }
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 统一使用GITHUB_TOKEN（gh命令兼容此变量）
+
+# Upload release assets
+- name: Upload release assets
+  uses: softprops/action-gh-release@v1
+  with:
+    name: Windows7_ULT&ENT_32&64  # Release显示名称
+    tag_name: Windows7_ULT&ENT_32&64  # Tag名称（含特殊字符无需额外转义，action会处理）
+    draft: false
+    prerelease: false
+    generate_release_notes: false
+    overwrite: false  # 已提前删除旧Release，无需覆盖
+    files: |
+      workdir/*.7z.*  # 匹配workdir下所有.7z.开头的分片压缩文件
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

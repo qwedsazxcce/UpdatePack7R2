@@ -334,6 +334,19 @@ jobs:
             throw "No split volume files were created"
         }
         
+    - name: Prepare release assets list
+      run: |
+        cd workdir
+        $files = Get-ChildItem -Path . -Filter "Windows7_ULT&ENT_32&64.7z.*" | ForEach-Object { "workdir/$($_.Name)" }
+        if ($files) {
+            $filesList = $files -join "`n"
+            echo "FILES_LIST<<EOF`n$filesList`nEOF" >> $env:GITHUB_ENV
+        } else {
+            echo "No split files found!"
+            exit 1
+        }
+      shell: pwsh
+      
     - name: Upload release assets
       uses: softprops/action-gh-release@v1
       with:
@@ -344,6 +357,6 @@ jobs:
         generate_release_notes: false
         overwrite: true
         files: |
-          workdir/*.7z.*
+          ${{ env.FILES_LIST }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

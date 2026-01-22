@@ -1,66 +1,62 @@
-name: 121212121212
+# 工作流名称（可自定义）
+name: Build and Upload Windows7 Release
 
-env:
-  # Download URL environment variables - for easy replacement later
-  WIN7_X86_ULTIMATE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
-  WIN7_X86_ULTIMATE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
-  WIN7_X86_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
-  WIN7_X86_ENTERPRISE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.001
-  WIN7_X86_ENTERPRISE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ENTERPRISE-26.1.15/install_Windows7x86ENTERPRISE-26.1.15.7z.002
-  WIN7_X86_ENTERPRISE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Misc/test.txt
-  WIN7_X64_ULTIMATE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001
-  WIN7_X64_ULTIMATE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002
-  WIN7_X64_ULTIMATE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003
-  WIN7_X64_ENTERPRISE_URL_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001
-  WIN7_X64_ENTERPRISE_URL_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
-  WIN7_X64_ENTERPRISE_URL_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
-
-"on":
+# 触发规则：支持手动触发 + 可选的代码推送触发（按需启用）
+on:
+  # 手动触发（推荐，方便测试和控制执行时机）
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-      - '.github/workflows/Windows_7_ULT_ENT_32_64.yml'
+  # 可选：当推送到main分支时自动触发（取消注释即可启用）
+  # push:
+  #   branches: [ main ]
+  #   paths:
+  #     - 'workdir/**'  # 仅当workdir目录文件变动时触发
 
+# 定义作业
 jobs:
+  upload-windows7-release:
+    # 运行环境（推荐使用Ubuntu最新版，兼容性最好）
+    runs-on: ubuntu-latest
+    # 设置权限（确保能操作Release/Tag）
+    permissions:
+      contents: write  # 必须授予写入内容的权限，否则无法创建/删除Release/Tag
 
+    steps:
+      # 步骤1：检出仓库代码（必须，否则无法访问workdir目录的文件）
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-# Delete existing release and tag if they exist
-- name: Delete existing release and tag
-  shell: pwsh  # 明确指定PowerShell Shell，匹配脚本语法
-  run: |
-    # 定义目标名称（统一管理，避免重复书写，方便后续修改）
-    $targetName = "Windows7_ULT&ENT_32&64"
-    
-    # ===== 1. 检查并删除Release =====
-    try {
-        # 用双引号包裹含特殊字符的名称，重定向错误输出避免冗余报错
-        $releaseId = gh release view "$targetName" --json id --jq ".id" 2>&1
-        # 通过gh命令的退出码判断Release是否存在（最可靠的方式）
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Found existing release: $targetName, deleting..."
-            gh release delete "$targetName" --cleanup-tag --yes  # --cleanup-tag会同步删除关联Tag
-        } else {
-            Write-Host "No existing release found for: $targetName"
-        }
-    }
-    catch {
-        Write-Host "No existing release found for: $targetName (error: $_)"
-    }
+      # 步骤2：删除已存在的Release和Tag（处理特殊字符&，确保幂等性）
+      - name: Delete existing release and tag
+        shell: pwsh
+        run: |
+          $targetName = "Windows7_ULT&ENT_32&64"
+          
+          # 检查并删除Release
+          try {
+              $releaseId = gh release view "$targetName" --json id --jq ".id" 2>&1
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "Found existing release: $targetName, deleting..."
+                  gh release delete "$targetName" --cleanup-tag --yes
+              } else {
+                  Write-Host "No existing release found for: $targetName"
+              }
+          }
+          catch {
+              Write-Host "No existing release found for: $targetName (error: $_)"
+          }
 
-    # ===== 2. 兜底检查并删除Tag（防止--cleanup-tag未生效） =====
-    try {
-        # 用双引号包裹标签名，指定refs/tags完整路径
-        git ls-remote --tags origin "refs/tags/$targetName" 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Found existing tag: $targetName, deleting..."
-            git push origin --delete "refs/tags/$targetName"
-        } else {
-            Write-Host "No existing tag found for: $targetName"
-        }
-    }
-    catch {
-        Write-Host "No existing tag found for: $targetName (error: $_)"
-    }
-  env:
-    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 统一使用GITHUB_TOKEN（gh命令兼容此变量）
+          # 兜底检查并删除Tag（防止--cleanup-tag未生效）
+          try {
+              git ls-remote --tags origin "refs/tags/$targetName" 2>&1 | Out-Null
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "Found existing tag: $targetName, deleting..."
+                  git push origin --delete "refs/tags/$targetName"
+              } else {
+                  Write-Host "No existing tag found for: $targetName"
+              }
+          }
+          catch {
+              Write-Host "No existing tag found for: $targetName (error: $_)"
+          }
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

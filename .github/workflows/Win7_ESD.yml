@@ -334,6 +334,33 @@ jobs:
             throw "No split volume files were created"
         }
         
+    - name: Delete existing release assets
+      run: |
+        # Get release ID
+        $releaseInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/Windows7_ULT&ENT_32&64" -Headers @{
+          Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}"
+        }
+        
+        # Get all assets for this release
+        $assets = $releaseInfo.assets
+        
+        # Delete assets that match our pattern
+        foreach ($asset in $assets) {
+          if ($asset.name -match "Windows7_ULT&ENT_32&64.7z.") {
+            Write-Host "Deleting asset: $($asset.name)"
+            try {
+              Invoke-RestMethod -Method Delete -Uri "https://api.github.com/repos/${{ github.repository }}/releases/assets/$($asset.id)" -Headers @{
+                Authorization = "Bearer ${{ secrets.GITHUB_TOKEN }}"
+              }
+              Write-Host "Successfully deleted $($asset.name)"
+            } catch {
+              Write-Host "Could not delete asset $($asset.name): $($_.Exception.Message)"
+            }
+          }
+        }
+      shell: pwsh
+      continue-on-error: true
+      
     - name: Prepare release assets list
       run: |
         cd workdir

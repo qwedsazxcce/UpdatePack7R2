@@ -82,13 +82,32 @@ jobs:
         $repoUrl = git remote get-url origin
         Write-Host "Repository URL: $repoUrl"
         
-        if ($repoUrl -match "github.com[:/](.+?)/(.+?)\.git") {
+        $owner = $null
+        $name = $null
+        
+        # 处理不同的URL格式
+        if ($repoUrl -match "github\.com[:/]([^/]+)/(.+?)(\.git)?$" -or 
+            $repoUrl -match "github\.com/([^/]+)/(.+?)$" -or
+            $repoUrl -match "https://github\.com/([^/]+)/(.+?)(\.git)?$" -or
+            $repoUrl -match "git@github\.com:([^/]+)/(.+?)(\.git)?$" -or
+            $repoUrl -match "ssh://git@github\.com/([^/]+)/(.+?)(\.git)?$" -or
+            $repoUrl -match "github\.com\\(.+?)\\(.+?)(\.git)?$") {
+            
             $owner = $matches[1]
             $name = $matches[2]
+            
+            # 清理可能的.git后缀
+            if ($name -like "*.git") {
+                $name = $name -replace "\.git$", ""
+            }
+            
             Write-Host "Detected owner: $owner"
             Write-Host "Detected name: $name"
-            
-            # 如果用户通过输入参数指定了，则使用用户指定的值
+        }
+        
+        # 如果自动检测失败，使用输入参数
+        if ([string]::IsNullOrEmpty($owner) -or [string]::IsNullOrEmpty($name)) {
+            Write-Host "Auto-detection failed, trying manual input..."
             if ("${{ github.event.inputs.repo_owner }}" -ne "") {
                 $owner = "${{ github.event.inputs.repo_owner }}"
                 Write-Host "Using specified owner: $owner"
@@ -97,12 +116,18 @@ jobs:
                 $name = "${{ github.event.inputs.repo_name }}"
                 Write-Host "Using specified name: $name"
             }
-            
-            echo "repo_owner=$owner" >> $env:GITHUB_OUTPUT
-            echo "repo_name=$name" >> $env:GITHUB_OUTPUT
-        } else {
-            throw "Could not parse repository information from URL: $repoUrl"
         }
+        
+        # 最后的验证
+        if ([string]::IsNullOrEmpty($owner) -or [string]::IsNullOrEmpty($name)) {
+            Write-Error "Could not determine repository information"
+            Write-Error "Repository URL: $repoUrl"
+            Write-Error "Manual inputs - Owner: '${{ github.event.inputs.repo_owner }}', Name: '${{ github.event.inputs.repo_name }}'"
+            throw "Repository information detection failed"
+        }
+        
+        echo "repo_owner=$owner" >> $env:GITHUB_OUTPUT
+        echo "repo_name=$name" >> $env:GITHUB_OUTPUT
       shell: pwsh
       
     - name: Delete existing release assets

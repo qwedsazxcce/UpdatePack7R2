@@ -7,25 +7,24 @@ on:
 
 jobs:
   test-compress-upload:
-    runs-on: windows-latest  # 必须用Windows环境，保证命令兼容
+    runs-on: windows-latest
     env:
-      # ========== 核心配置 ==========
       WORK_DIR: ${{ github.workspace }}
       ESD_FILE_NAME: Windows_7_ULT&ENT_32&64.esd
       SPLIT_SIZE: 1950M
-      RETRY_COUNT: 3  # 测试时减少重试次数，加快排查
+      RETRY_COUNT: 3
       RETRY_INTERVAL: 10
       RELEASE_NAME: Windows7_ULT&ENT_32&64
       DOWNLOAD_URL: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
 
     steps:
-      # 步骤1：检出仓库（基础步骤）
+      # 步骤1：检出仓库
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1  # 仅拉取最新代码，加快速度
 
-      # 步骤2：调试 - 输出环境信息（定位路径/变量问题）
+      # 步骤2：调试 - 输出环境信息（修复7z版本查看命令）
       - name: Debug - Print env info
         shell: pwsh
         run: |
@@ -34,10 +33,11 @@ jobs:
           Write-Host "ESD文件名：$env:ESD_FILE_NAME"
           Write-Host "Release名称：$env:RELEASE_NAME"
           Write-Host "系统路径：$(Get-Location)"
-          Write-Host "7z版本：$(7z --version | Select-Object -First 1)"
+          # 核心修复：7z无--version参数，用-h（帮助）获取版本信息
+          Write-Host "7z版本：$(7z -h | Select-Object -First 1)"
           Write-Host "GH CLI版本：$(gh --version | Select-Object -First 1)"
 
-      # 步骤3：下载文件并命名为目标ESD（带调试）
+      # 步骤3：下载文件并命名为目标ESD
       - name: Step 1 - Download & rename file
         shell: pwsh
         run: |
@@ -46,7 +46,7 @@ jobs:
           Write-Host "下载URL：$env:DOWNLOAD_URL"
           Write-Host "保存路径：$targetFilePath"
           
-          # 下载文件（带进度日志）
+          # 下载文件
           curl.exe -L -o "$targetFilePath" "$env:DOWNLOAD_URL"
           if ($LASTEXITCODE -ne 0) {
             throw "下载失败，curl退出码：$LASTEXITCODE"
@@ -60,7 +60,7 @@ jobs:
             throw "❌ 下载后的文件不存在！"
           }
 
-      # 步骤4：分卷压缩（带详细日志，确保执行）
+      # 步骤4：分卷压缩ESD文件
       - name: Step 2 - Split compress ESD
         shell: pwsh
         run: |
@@ -73,7 +73,7 @@ jobs:
             throw "❌ 源ESD文件不存在：$esdPath"
           }
           
-          # 拼接7z参数并执行
+          # 拼接7z参数并执行压缩
           $volParam = "-v$($env:SPLIT_SIZE)"
           Write-Host "7z命令：7z a -y $volParam `"$splitOutput`" `"$esdPath`""
           7z a -y $volParam "$splitOutput" "$esdPath"
@@ -91,7 +91,7 @@ jobs:
           Write-Host "✅ 压缩成功！生成分卷文件："
           $splitFiles | ForEach-Object { Write-Host "  - $($_.FullName)" }
 
-      # 步骤5：上传到GitHub Release（带完整调试日志）
+      # 步骤5：上传到GitHub Release
       - name: Step 3 - Upload to Release
         shell: pwsh
         env:
@@ -108,7 +108,7 @@ jobs:
           Write-Host "待上传文件数：$($splitFiles.Count)"
           $splitFiles | ForEach-Object { Write-Host "  - 待上传：$($_.FullName)" }
 
-          # 2. 删除旧Release/Tag（带日志）
+          # 2. 删除旧Release/Tag
           Write-Host "=== 删除旧Release/Tag ==="
           gh release delete "$releaseName" -y 2>&1 | Out-Null
           Write-Host "已删除旧Release：$releaseName"
@@ -116,16 +116,15 @@ jobs:
           git push origin --delete "$releaseName" 2>&1 | Out-Null
           Write-Host "已删除旧Tag：$releaseName"
 
-          # 3. 上传重试逻辑（带详细日志）
+          # 3. 上传重试逻辑
           $uploadSuccess = $false
           for ($i=1; $i -le $env:RETRY_COUNT; $i++) {
             try {
               Write-Host "=== 第 $i 次上传尝试 ==="
-              # 创建Release（带详细输出）
-              Write-Host "创建Release：$releaseName"
+              # 创建Release（带调试日志）
               gh release create "$releaseName" --title "$releaseName" --notes "Test: Compress & Upload ESD (Test Run)" --debug
               
-              # 逐个上传文件（带结果日志）
+              # 逐个上传文件
               foreach ($file in $splitFiles) {
                 Write-Host "上传文件：$($file.FullName)"
                 gh release upload "$releaseName" "$($file.FullName)" --clobber --debug
@@ -151,10 +150,10 @@ jobs:
           }
           Write-Host "=== 上传流程全部完成 ==="
 
-      # 步骤6：可选 - 上传到Artifact（备用验证）
+      # 步骤6：备用 - 上传到Artifact（验证文件生成）
       - name: Step 4 - Upload to Artifact (Backup)
         uses: actions/upload-artifact@v4
         with:
           name: Test-ESD-Split-Files
           path: ${{ env.WORK_DIR }}\${{ env.ESD_FILE_NAME }}.7z.*
-          retention-days: 7  # 仅保留7天，节省空间
+          retention-days: 7

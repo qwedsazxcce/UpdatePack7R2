@@ -33,11 +33,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ========== 步骤1：循环处理每个Windows 7版本（彻底去掉JSON传递，无解析错误） ==========
+      # ========== 步骤1：循环处理每个Windows 7版本（修复7z解压命令） ==========
       - name: Process each Windows 7 version
         shell: pwsh
         run: |
-          # 直接在当前步骤定义版本列表（避免跨步骤JSON传递的引号冲突）
+          # 直接定义版本列表，避免JSON跨步骤解析错误
           $versions = @(
             @{ Prefix = "install_Windows7x86ULTIMATE"; Index = 5 },
             @{ Prefix = "install_Windows7x86ENTERPRISE"; Index = 1 },
@@ -68,12 +68,15 @@ jobs:
               }
             }
 
-            # ---------- 子步骤1.2：合并并解压7z分卷 ----------
+            # ---------- 子步骤1.2：合并并解压7z分卷（核心修复：7z -o参数语法） ----------
             Write-Host "解压 $prefix 分卷压缩包"
-            7z x -y "$prefix.001" -o"$prefix_temp"
-            # 7z解压警告码1（非致命）忽略，仅错误码非0且非1时抛出异常
-            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
-              throw "解压 $prefix 失败，退出码：$LASTEXITCODE"
+            # 修复1：先拼接完整的-o参数（无空格），避免PowerShell解析拆分
+            $outputPathParam = "-o`"$prefix_temp`""
+            # 修复2：7z命令参数按正确语法拼接，-o和路径无空格
+            7z x -y "$prefix.001" $outputPathParam
+            # 7z退出码说明：0=成功，1=警告（如部分文件已存在），≥2=错误
+            if ($LASTEXITCODE -ge 2) {
+              throw "解压 $prefix 失败，7z退出码：$LASTEXITCODE"
             }
 
             # ---------- 子步骤1.3：获取WIM文件名 ----------
@@ -87,7 +90,6 @@ jobs:
             # ---------- 子步骤1.4：调用CMD转换WIM到ESD（解决编码问题） ----------
             Write-Host "转换 $prefix WIM到ESD（索引：$index）"
             $esdPath = "`"$($env:ESD_MAIN_FILE)`""
-            # 拼接DISM命令，通过CMD执行避免PowerShell编码冲突
             $dismCmd = "dism /export-image /sourceimagefile=$wimPath /sourceindex=$index /destinationimagefile=$esdPath /compress:recovery /checkintegrity"
             cmd /c $dismCmd
             if ($LASTEXITCODE -ne 0) {
@@ -116,9 +118,10 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "分卷压缩 $($env:ESD_MAIN_FILE)（分卷大小：$($env:SPLIT_SIZE)）"
-          # 双引号包裹文件名，7z分卷压缩（1950M/卷）
-          7z a -y -v$($env:SPLIT_SIZE) "`"$($env:ESD_MAIN_FILE).7z`"" "`"$($env:ESD_MAIN_FILE)`""
-          if ($LASTEXITCODE -ne 0) {
+          # 同样修复7z分卷参数的引号/空格问题
+          $splitParam = "-v$($env:SPLIT_SIZE)"
+          7z a -y $splitParam "`"$($env:ESD_MAIN_FILE).7z`"" "`"$($env:ESD_MAIN_FILE)`""
+          if ($LASTEXITCODE -ge 2) {
             throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
           }
           # 删除原始ESD文件，仅保留分卷
@@ -137,7 +140,6 @@ jobs:
 
           # ---------- 子步骤3.1：删除原有Release和Tag ----------
           Write-Host "删除原有Release/Tag：$releaseName"
-          # 忽略删除不存在的Release/Tag的错误
           gh release delete "$releaseName" -y 2>&1 | Out-Null
           git tag -d "$releaseName" 2>&1 | Out-Null
           git push origin --delete "$releaseName" 2>&1 | Out-Null
@@ -147,9 +149,7 @@ jobs:
           for ($i=1; $i -le $retryCount; $i++) {
             try {
               Write-Host "第 $i 次尝试上传（共 $retryCount 次）"
-              # 创建新Release（自动创建同名Tag）
               gh release create "$releaseName" --title "$releaseName" --notes "Auto-built Windows 7 ESD"
-              # 上传所有分卷文件（--clobber覆盖已有文件）
               foreach ($file in $splitFiles) {
                 gh release upload "$releaseName" "`"$($file.FullName)`"" --clobber
               }
@@ -170,14 +170,12 @@ jobs:
             throw "重试 $retryCount 次后仍上传失败"
           }
 
-      # ========== 步骤4：最终兜底清理（无论成败都执行） ==========
+      # ========== 步骤4：最终兜底清理 ==========
       - name: Final cleanup
         shell: pwsh
         if: always()
         run: |
           Write-Host "执行最终清理"
-          # 删除所有临时解压目录
           Get-ChildItem -Path . -Filter "*_temp" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          # 删除残留的7z分卷源文件
           Get-ChildItem -Path . -Filter "install_Windows7*.00*" | Remove-Item -Force -ErrorAction SilentlyContinue
           Write-Host "清理完成"

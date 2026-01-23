@@ -45,30 +45,41 @@ jobs:
         uses: actions/checkout@v4
 
       # ==============================================
-      # 2. 关键编码配置（ANSI读WIM + UTF8日志）
+      # 2. 增强版编码配置（核心修复：确保ANSI编码可调用）
       # ==============================================
-      - name: Critical encoding setup (ANSI for WIM, UTF8 for log)
+      - name: Critical encoding setup (Robust ANSI/UTF8)
         run: |
-          # 1. 注册ANSI编码（936=GBK），解决GetEncoding(936)可能失败的问题
+          # 强制加载CodePagesEncodingProvider，多次尝试确保成功
           try {
-            [System.Text.Encoding]::GetEncoding(936)
-          } catch {
             $encodingProvider = [System.Text.CodePagesEncodingProvider]::Instance
             [System.Text.Encoding]::RegisterProvider($encodingProvider)
+            Write-Host "CodePagesEncodingProvider注册成功"
+          } catch {
+            Write-Warning "首次注册编码提供器失败：$_，重试..."
+            # 重试注册
+            $assembly = [System.Reflection.Assembly]::LoadWithPartialName("System.Text.Encoding.CodePages")
+            $encodingProvider = [System.Text.CodePagesEncodingProvider]::Instance
+            [System.Text.Encoding]::RegisterProvider($encodingProvider)
+            Write-Host "重试后编码提供器注册成功"
           }
           
-          # 2. 日志输出用UTF8（避免乱码）
-          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-          [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+          # 初始化编码变量，失败则用UTF8兜底
+          try {
+            $global:ANSI_ENCODING = [System.Text.Encoding]::GetEncoding(936)
+            $global:UTF8_ENCODING = [System.Text.Encoding]::UTF8
+            Write-Host "编码配置完成："
+            Write-Host "   - ANSI编码（936/GBK）：$($global:ANSI_ENCODING.EncodingName)"
+            Write-Host "   - UTF8编码：$($global:UTF8_ENCODING.EncodingName)"
+          } catch {
+            Write-Warning "ANSI编码(936)加载失败，降级为UTF8：$_"
+            $global:ANSI_ENCODING = [System.Text.Encoding]::UTF8
+            $global:UTF8_ENCODING = [System.Text.Encoding]::UTF8
+          }
           
-          # 3. 定义ANSI编码对象（读取WIM元数据用）
-          $global:ANSI_ENCODING = [System.Text.Encoding]::GetEncoding(936)
-          $global:UTF8_ENCODING = [System.Text.Encoding]::UTF8
-          
-          Write-Host "编码配置完成："
-          Write-Host "   - 读取WIM元数据：ANSI(936/GBK)"
-          Write-Host "   - 日志输出：UTF8"
-          Write-Host "   - ANSI编码名称：$($global:ANSI_ENCODING.EncodingName)"
+          # 强制设置控制台编码
+          [Console]::OutputEncoding = $global:UTF8_ENCODING
+          [Console]::InputEncoding = $global:UTF8_ENCODING
+          Write-Host "控制台编码已设为：$([Console]::OutputEncoding.EncodingName)"
 
       # ==============================================
       # 3. 安装并认证GitHub CLI
@@ -83,7 +94,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ==============================================
-      # 4. 初始化统一ESD文件（修复路径引号）
+      # 4. 初始化统一ESD文件
       # ==============================================
       - name: Initialize main ESD file
         run: |
@@ -94,16 +105,15 @@ jobs:
             Remove-Item -Path $mainESD -Force 
             Write-Host "   - 已删除原有文件"
           }
-          # PowerShell内部命令直接用变量，自动处理&特殊字符
           New-Item -Path $mainESD -ItemType File -Force | Out-Null
           Write-Host "ESD文件创建成功，完整路径：$((Get-Item $mainESD).FullName)"
 
       # ==============================================
-      # 5. 循环处理所有Windows7版本（修复DISM空值+索引问题）
+      # 5. 循环处理所有Windows7版本（终极修复版）
       # ==============================================
       - name: Process all Windows7 versions in order
         run: |
-          # 定义通用下载函数（修复curl路径+文件检测+大小验证）
+          # 定义通用下载函数
           function Download-7zParts {
             param(
               [string]$VerName,
@@ -116,11 +126,10 @@ jobs:
               $varKey = "install_${VerName}_${partNum}"
               $downloadUrl = [Environment]::GetEnvironmentVariable($varKey)
               $savePath = "$VerName.7z.$partNum"
-              $retryCount = 3  # 下载重试次数
-              $retryInterval = 3  # 下载重试间隔（秒）
+              $retryCount = 3
+              $retryInterval = 3
               $downloadOk = $false
               
-              # 前置检查URL是否为空
               if (-not $downloadUrl) {
                 Write-Error "   分卷 $i：URL为空，无法下载"
                 $allPartsDownloaded = $false
@@ -132,28 +141,22 @@ jobs:
               Write-Host "      - 保存路径：$savePath"
               Write-Host "      - 重试次数：$retryCount 次，间隔 $retryInterval 秒"
               
-              # 下载重试循环
               for ($retry=1; $retry -le $retryCount; $retry++) {
                 try {
-                  # 先删除可能存在的不完整文件
                   if (Test-Path $savePath) {
                     Remove-Item -Path $savePath -Force
                     Write-Host "      - 重试$retry：删除已有不完整文件 $savePath"
                   }
                   
-                  # 修复1：curl路径写法（直接用"$savePath"，无双层引号）
                   & curl.exe -L -o "$savePath" $downloadUrl
-                  # 修复2：增加1秒延迟，等待文件系统刷盘
                   Start-Sleep -Seconds 1
                   
-                  # 修复3：验证退出码+文件存在+文件大小>0（排除空文件）
                   if ($LASTEXITCODE -eq 0 -and (Test-Path $savePath) -and ((Get-Item $savePath).Length -gt 0)) {
                     $fileSize = (Get-Item $savePath).Length / 1MB
                     Write-Host "      - 重试$retry：下载成功，文件大小：$($fileSize.ToString("0.00")) MB"
                     $downloadOk = $true
-                    break  # 成功则退出重试循环
+                    break
                   } else {
-                    # 输出详细失败原因，便于排查
                     $errMsg = "curl退出码：$LASTEXITCODE"
                     if (-not (Test-Path $savePath)) { 
                       $errMsg += "，文件不存在" 
@@ -164,7 +167,6 @@ jobs:
                   }
                 } catch {
                   Write-Warning "      - 重试$retry：下载失败，原因：$_"
-                  # 最后一次重试失败，标记为整体失败
                   if ($retry -eq $retryCount) {
                     Write-Error "      - 分卷 $i：$retryCount 次重试均失败，无法下载"
                     $allPartsDownloaded = $false
@@ -175,13 +177,11 @@ jobs:
                 }
               }
               
-              # 单个分卷下载失败，终止
               if (-not $downloadOk) {
                 break
               }
             }
             
-            # 下载完成后验证文件列表
             if ($allPartsDownloaded) {
               Write-Host "`n   $VerName分卷下载完成，当前目录文件："
               Get-ChildItem -Path "$VerName.7z.*" -Name | Sort-Object | ForEach-Object { Write-Host "      - $_" }
@@ -192,10 +192,8 @@ jobs:
 
           $versions = $env:VERSION_CONFIG | ConvertFrom-Json
           $mainESD = $env:MAIN_ESD_NAME
-          # 外部命令（DISM/7z）用双引号包裹路径
           $mainESD_External = "`"$mainESD`""
           
-          # 输出当前工作目录（关键调试）
           Write-Host "当前工作目录：$PWD"
           Write-Host "工作目录文件列表（初始）："
           Get-ChildItem -Path . -Name | Sort-Object | ForEach-Object { Write-Host "   - $_" }
@@ -204,60 +202,47 @@ jobs:
             $verName = $ver.Name
             $esdIndex = $ver.ESDIndex
             $partCount = $ver.Parts
-            $unzipRetryCount = 1  # 解压失败后重试下载的次数（改这里调整次数）
+            $unzipRetryCount = 1
             
             Write-Host "`n=================================================="
             Write-Host "开始处理版本：$verName (目标索引：$esdIndex)"
             Write-Host "=================================================="
             
-            # ------------------------------
-            # 子步骤1：下载分卷压缩包（调用修复后的下载函数）
-            # ------------------------------
+            # 子步骤1：下载分卷
             $allPartsDownloaded = Download-7zParts -VerName $verName -PartCount $partCount
             if (-not $allPartsDownloaded) {
               throw "版本$verName 分卷下载不完整，终止处理"
             }
 
-            # ------------------------------
-            # 子步骤2：解压分卷压缩包（修复7z路径解析）
-            # ------------------------------
+            # 子步骤2：解压分卷（绝对路径）
             Write-Host "`n步骤2：解压分卷包..."
             $first7z = "$verName.7z.001"
             $extractDir = "$verName"
-            # 修复1：获取绝对路径（核心）
             $first7z_AbsPath = (Resolve-Path -Path $first7z -ErrorAction Stop).Path
-            $extractDir_AbsPath = (Resolve-Path -Path . -ErrorAction Stop).Path + "\$extractDir"
+            $extractDir_AbsPath = Join-Path -Path (Resolve-Path -Path .).Path -ChildPath $extractDir
             $unzipOk = $false
 
-            # 输出绝对路径调试信息
             Write-Host "   解压入口文件绝对路径：$first7z_AbsPath"
             Write-Host "   解压目标目录绝对路径：$extractDir_AbsPath"
             Write-Host "   验证文件是否存在：$(Test-Path $first7z_AbsPath)"
 
-            # 解压重试循环（失败则重下）
             for ($unzipRetry=0; $unzipRetry -le $unzipRetryCount; $unzipRetry++) {
               if ($unzipRetry -gt 0) {
                 Write-Host "`n   解压失败，开始第$unzipRetry次重试：删除损坏包并重新下载..."
-                # 删除所有损坏的分卷包
                 Get-ChildItem -Path "$verName.7z.*" -ErrorAction SilentlyContinue | Remove-Item -Force
-                Write-Host "   已删除$verName所有7z分卷包"
-                # 重新下载
                 $allPartsDownloaded = Download-7zParts -VerName $verName -PartCount $partCount
                 if (-not $allPartsDownloaded) {
                   throw "版本$verName 重新下载分卷失败，终止处理"
                 }
-                # 重新获取绝对路径
                 $first7z_AbsPath = (Resolve-Path -Path $first7z -ErrorAction Stop).Path
               }
 
-              # 检查解压入口文件（绝对路径）
               if (-not (Test-Path $first7z_AbsPath)) {
-                Write-Warning "   未找到解压入口文件（绝对路径）：$first7z_AbsPath"
+                Write-Warning "   未找到解压入口文件：$first7z_AbsPath"
                 continue
               }
 
-              # 修复2：7z命令用绝对路径，-o后面无空格（核心）
-              Write-Host "   执行7z解压命令：7z.exe x `"$first7z_AbsPath`" -o`"$extractDir_AbsPath`" -y"
+              Write-Host "   执行7z解压：7z.exe x `"$first7z_AbsPath`" -o`"$extractDir_AbsPath`" -y"
               & 7z.exe x "$first7z_AbsPath" -o"$extractDir_AbsPath" -y
               
               if ($LASTEXITCODE -eq 0) {
@@ -267,21 +252,17 @@ jobs:
               } else {
                 Write-Error "   解压失败，7z退出码：$LASTEXITCODE"
                 if ($unzipRetry -eq $unzipRetryCount) {
-                  throw "版本$verName 解压失败（已重试$unzipRetryCount次），终止处理"
+                  throw "版本$verName 解压失败（已重试$unzipRetryCount次）"
                 }
               }
             }
 
-            # 解压最终失败
             if (-not $unzipOk) {
               throw "版本$verName 解压失败，所有重试已用尽"
             }
 
-            # ------------------------------
-            # 子步骤3：查找WIM文件 + 读取ANSI编码的映像名（修复DISM空值）
-            # ------------------------------
-            Write-Host "`n步骤3：查找WIM文件并读取映像名（ANSI编码）..."
-            # 查找WIM文件（递归）
+            # 子步骤3：读取WIM映像名（终极修复：编码+DISM处理）
+            Write-Host "`n步骤3：查找WIM文件并读取映像名..."
             $wimFiles = Get-ChildItem -Path $extractDir_AbsPath -Filter *.wim -Recurse -ErrorAction Stop
             if ($wimFiles.Count -eq 0) { 
               throw "未找到WIM文件（解压目录：$extractDir_AbsPath）" 
@@ -291,46 +272,53 @@ jobs:
             $wimPath_External = "`"$wimPath`""
             
             Write-Host "   找到WIM文件：$wimPath"
-            # 验证WIM文件有效性（大小>0）
             if ((Get-Item $wimPath).Length -eq 0) {
               throw "WIM文件为空（损坏）：$wimPath"
             }
             
-            # 修复：输出完整索引值，执行DISM并捕获所有输出
-            Write-Host "   读取WIM索引$esdIndex（ANSI解码）..."
+            # 核心修复：DISM执行+编码处理拆分
+            Write-Host "   读取WIM索引$esdIndex的映像名..."
             $dismCommand = "dism /Get-WimInfo /WimFile:$wimPath_External /Index:$esdIndex"
             Write-Host "   执行DISM命令：$dismCommand"
             
-            # 执行DISM，强制捕获所有输出（包括错误），并处理空值
             try {
-              $dismOutput = & dism /Get-WimInfo /WimFile:$wimPath_External /Index:$esdIndex 2>&1
-              # 检查DISM输出是否为空
-              if ($null -eq $dismOutput -or $dismOutput.Count -eq 0) {
-                throw "DISM命令执行后无输出，可能是WIM文件损坏或索引$esdIndex不存在"
+              # 第一步：执行DISM，确保输出不为空
+              $dismRawOutput = & dism /Get-WimInfo /WimFile:$wimPath_External /Index:$esdIndex 2>&1
+              if ($null -eq $dismRawOutput -or $dismRawOutput.Count -eq 0) {
+                throw "DISM无输出，可能是WIM索引$esdIndex不存在或文件损坏"
               }
-              # 转换为ANSI编码（处理空值）
-              $dismOutputStr = $dismOutput -join "`n"
-              $dismOutputBytes = $global:ANSI_ENCODING.GetBytes($dismOutputStr)
-              $dismOutputANSI = $global:ANSI_ENCODING.GetString($dismOutputBytes)
+              
+              # 第二步：转为字符串（避免数组/空值问题）
+              $dismOutputStr = $dismRawOutput | Out-String
+              if ([string]::IsNullOrEmpty($dismOutputStr)) {
+                throw "DISM输出为空字符串"
+              }
+              
+              # 第三步：编码转换（兜底处理）
+              try {
+                $dismOutputBytes = $global:ANSI_ENCODING.GetBytes($dismOutputStr)
+                $dismOutputFinal = $global:ANSI_ENCODING.GetString($dismOutputBytes)
+              } catch {
+                Write-Warning "ANSI编码转换失败，使用原始输出：$_"
+                $dismOutputFinal = $dismOutputStr
+              }
+              
+              # 第四步：提取映像名
+              $imageNameMatch = [regex]::Match($dismOutputFinal, 'Image Name\s*:\s*(.+)')
+              if ($imageNameMatch.Success) {
+                $imageName = $imageNameMatch.Groups[1].Value.Trim()
+                if ([string]::IsNullOrEmpty($imageName)) {
+                  throw "映像名提取为空"
+                }
+                Write-Host "成功读取映像名：$imageName"
+              } else {
+                throw "未找到映像名（Image Name）`nDISM输出：$dismOutputFinal"
+              }
             } catch {
-              throw "DISM命令执行失败：$_`nDISM命令：$dismCommand`nWIM路径：$wimPath"
-            }
-            
-            # 提取映像名（Image Name）
-            $imageNameLine = $dismOutputANSI | Select-String -Pattern "Image Name\s*:\s*(.*)"
-            if ($imageNameLine) {
-              $imageName = $imageNameLine.Matches.Groups[1].Value.Trim()
-              Write-Host "成功读取映像名：$imageName"
-              if ([string]::IsNullOrEmpty($imageName)) {
-                throw "映像名读取为空（WIM索引$esdIndex，文件：$wimPath）"
-              }
-            } else {
-              throw "未从WIM中提取到映像名（索引$esdIndex）`nDISM输出：$dismOutputANSI"
+              throw "读取WIM映像名失败：$_`nDISM命令：$dismCommand`nWIM路径：$wimPath"
             }
 
-            # ------------------------------
-            # 子步骤4：WIM转换为ESD并追加（保留映像名）
-            # ------------------------------
+            # 子步骤4：WIM转ESD
             Write-Host "`n步骤4：转换WIM索引$esdIndex为ESD并追加..."
             & dism /Export-Image `
               /SourceImageFile:$wimPath_External `
@@ -340,13 +328,11 @@ jobs:
               /CheckIntegrity `
               /Append
             if ($LASTEXITCODE -ne 0) { 
-              throw "DISM转换失败，退出码：$LASTEXITCODE`nDISM输出：$dismOutputANSI" 
+              throw "DISM转换失败，退出码：$LASTEXITCODE" 
             }
             Write-Host "ESD追加成功，保留映像名：$imageName"
 
-            # ------------------------------
-            # 子步骤5：删除临时文件
-            # ------------------------------
+            # 子步骤5：清理临时文件
             Write-Host "`n步骤5：删除临时文件..."
             if (Test-Path $wimPath) { Remove-Item -Path $wimPath -Force }
             if (Test-Path $extractDir_AbsPath) { Remove-Item -Path $extractDir_AbsPath -Recurse -Force }
@@ -359,15 +345,13 @@ jobs:
           }
 
       # ==============================================
-      # 6. 7z分卷压缩ESD文件
+      # 6. 7z分卷压缩ESD
       # ==============================================
       - name: Split ESD with 7z (1950M/卷)
         run: |
           $mainESD = $env:MAIN_ESD_NAME
           $splitSize = $env:SPLIT_VOLUME_SIZE
           $7zPrefix = "$mainESD.7z"
-          $7zPrefix_External = "`"$7zPrefix`""
-          $mainESD_External = "`"$mainESD`""
           
           Write-Host "`n开始分卷压缩ESD文件：$mainESD"
           Write-Host "   分卷大小：$splitSize，前缀：$7zPrefix"
@@ -375,17 +359,15 @@ jobs:
           if (-not (Test-Path $mainESD)) { throw "主ESD文件不存在：$mainESD" }
           if ((Get-Item $mainESD).Length -eq 0) { throw "主ESD文件为空" }
           
-          # 7z分卷压缩（外部命令用带引号路径）
-          & 7z.exe a $7zPrefix_External $mainESD_External -v$splitSize -y -mx=9
+          & 7z.exe a "$7zPrefix" "$mainESD" -v$splitSize -y -mx=9
           if ($LASTEXITCODE -ne 0) { throw "7z分卷失败，退出码：$LASTEXITCODE" }
           
-          # 删除原始ESD，保留分卷
           Remove-Item -Path $mainESD -Force
           $splitFiles = Get-ChildItem -Path "$7zPrefix.*" | Select-Object -ExpandProperty Name
           Write-Host "分卷完成，生成文件：$($splitFiles -join ", ")"
 
       # ==============================================
-      # 7. 删除原有Release和Tag（带重试）
+      # 7. 删除原有Release/Tag
       # ==============================================
       - name: Delete existing Release and Tag
         run: |
@@ -421,7 +403,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ==============================================
-      # 8. 创建Release并上传分卷（带重试）
+      # 8. 创建Release并上传
       # ==============================================
       - name: Create Release and upload split files
         run: |
@@ -430,7 +412,6 @@ jobs:
           $retryInterval = 30
           $7zPrefix = "$($env:MAIN_ESD_NAME).7z"
           
-          # 获取所有分卷文件
           $splitFiles = Get-ChildItem -Path "$7zPrefix.*" -ErrorAction Stop
           if ($splitFiles.Count -eq 0) { throw "无7z分卷文件可上传" }
           
@@ -439,7 +420,7 @@ jobs:
             try {
               gh release create $releaseTag `
                 --title "$releaseTag" `
-                --notes "Windows7 ULT&ENT 32&64 合并ESD（7z分卷1950M/卷）`n包含映像名：$imageName"
+                --notes "Windows7 ULT&ENT 32&64 合并ESD（7z分卷1950M/卷）"
               Write-Host "Release创建成功（第$i次尝试）"
               break
             } catch {
@@ -451,12 +432,11 @@ jobs:
           Write-Host "`n上传分卷文件（共$($splitFiles.Count)个）..."
           foreach ($file in $splitFiles) {
             $filePath = $file.FullName
-            $filePath_External = "`"$filePath`""
             Write-Host "   上传：$filePath"
             
             for ($i=1; $i -le $retryTimes; $i++) {
               try {
-                gh release upload $releaseTag $filePath_External --clobber
+                gh release upload $releaseTag "$filePath" --clobber
                 Write-Host "$($file.Name) 上传成功（第$i次尝试）"
                 break
               } catch {
@@ -476,9 +456,7 @@ jobs:
           $7zPrefix = "$($env:MAIN_ESD_NAME).7z"
           Write-Host "`n最终清理临时文件..."
           
-          # 删除分卷文件
           Get-ChildItem -Path "$7zPrefix.*" -ErrorAction SilentlyContinue | Remove-Item -Force
-          # 兜底删除残留文件
           Get-ChildItem -Path @("*.7z.*", "*.wim", $env:MAIN_ESD_NAME) -ErrorAction SilentlyContinue | Remove-Item -Force
           
           Write-Host "所有临时文件清理完成"

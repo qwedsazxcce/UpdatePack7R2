@@ -99,7 +99,7 @@ jobs:
           Write-Host "ESD文件创建成功，完整路径：$((Get-Item $mainESD).FullName)"
 
       # ==============================================
-      # 5. 循环处理所有Windows7版本（修复7z路径解析）
+      # 5. 循环处理所有Windows7版本（修复DISM空值+索引问题）
       # ==============================================
       - name: Process all Windows7 versions in order
         run: |
@@ -278,23 +278,43 @@ jobs:
             }
 
             # ------------------------------
-            # 子步骤3：查找WIM文件 + 读取ANSI编码的映像名
+            # 子步骤3：查找WIM文件 + 读取ANSI编码的映像名（修复DISM空值）
             # ------------------------------
             Write-Host "`n步骤3：查找WIM文件并读取映像名（ANSI编码）..."
+            # 查找WIM文件（递归）
             $wimFiles = Get-ChildItem -Path $extractDir_AbsPath -Filter *.wim -Recurse -ErrorAction Stop
-            if ($wimFiles.Count -eq 0) { throw "未找到WIM文件" }
+            if ($wimFiles.Count -eq 0) { 
+              throw "未找到WIM文件（解压目录：$extractDir_AbsPath）" 
+            }
             $wimFile = $wimFiles | Select-Object -First 1
             $wimPath = $wimFile.FullName
             $wimPath_External = "`"$wimPath`""
             
             Write-Host "   找到WIM文件：$wimPath"
+            # 验证WIM文件有效性（大小>0）
+            if ((Get-Item $wimPath).Length -eq 0) {
+              throw "WIM文件为空（损坏）：$wimPath"
+            }
             
-            # 关键：用DISM读取WIM元数据，并用ANSI编码解析输出（避免映像名丢失）
-            Write-Host "   读取WIM索引$esdIndex的映像名（ANSI解码）..."
-            $dismOutput = & dism /Get-WimInfo /WimFile:$wimPath_External /Index:$esdIndex 2>&1
-            # 将DISM输出（ANSI字节）转换为字符串，避免UTF8读取乱码
-            $dismOutputBytes = $global:ANSI_ENCODING.GetBytes($dismOutput -join "`n")
-            $dismOutputANSI = $global:ANSI_ENCODING.GetString($dismOutputBytes)
+            # 修复：输出完整索引值，执行DISM并捕获所有输出
+            Write-Host "   读取WIM索引$esdIndex（ANSI解码）..."
+            $dismCommand = "dism /Get-WimInfo /WimFile:$wimPath_External /Index:$esdIndex"
+            Write-Host "   执行DISM命令：$dismCommand"
+            
+            # 执行DISM，强制捕获所有输出（包括错误），并处理空值
+            try {
+              $dismOutput = & dism /Get-WimInfo /WimFile:$wimPath_External /Index:$esdIndex 2>&1
+              # 检查DISM输出是否为空
+              if ($null -eq $dismOutput -or $dismOutput.Count -eq 0) {
+                throw "DISM命令执行后无输出，可能是WIM文件损坏或索引$esdIndex不存在"
+              }
+              # 转换为ANSI编码（处理空值）
+              $dismOutputStr = $dismOutput -join "`n"
+              $dismOutputBytes = $global:ANSI_ENCODING.GetBytes($dismOutputStr)
+              $dismOutputANSI = $global:ANSI_ENCODING.GetString($dismOutputBytes)
+            } catch {
+              throw "DISM命令执行失败：$_`nDISM命令：$dismCommand`nWIM路径：$wimPath"
+            }
             
             # 提取映像名（Image Name）
             $imageNameLine = $dismOutputANSI | Select-String -Pattern "Image Name\s*:\s*(.*)"
@@ -302,10 +322,10 @@ jobs:
               $imageName = $imageNameLine.Matches.Groups[1].Value.Trim()
               Write-Host "成功读取映像名：$imageName"
               if ([string]::IsNullOrEmpty($imageName)) {
-                throw "映像名读取为空！WIM元数据可能损坏"
+                throw "映像名读取为空（WIM索引$esdIndex，文件：$wimPath）"
               }
             } else {
-              throw "无法从WIM中提取映像名，索引$esdIndex可能不存在"
+              throw "未从WIM中提取到映像名（索引$esdIndex）`nDISM输出：$dismOutputANSI"
             }
 
             # ------------------------------

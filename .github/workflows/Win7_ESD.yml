@@ -35,7 +35,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: pwsh  # 仅保留有效的shell配置，移除错误的encoding参数
+        shell: pwsh  # 仅保留有效的shell配置
     
     steps:
       # ==============================================
@@ -45,14 +45,17 @@ jobs:
         uses: actions/checkout@v4
 
       # ==============================================
-      # 2. 初始化PowerShell编码（关键补充：设置ANSI/OEM编码）
+      # 2. 初始化PowerShell编码（修复：使用系统默认ANSI编码）
       # ==============================================
       - name: Set PowerShell ANSI encoding
         run: |
-          # 设置控制台输入/输出编码为OEM（对应Windows ANSI）
-          [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding("oem")
-          [Console]::InputEncoding = [System.Text.Encoding]::GetEncoding("oem")
-          Write-Host "PowerShell编码已设置为ANSI/OEM"
+          # 使用系统默认ANSI编码（兼容所有Windows语言环境）
+          $ansiEncoding = [System.Text.Encoding]::Default
+          [Console]::OutputEncoding = $ansiEncoding
+          [Console]::InputEncoding = $ansiEncoding
+          # 可选：输出当前编码确认（便于调试）
+          Write-Host "PowerShell控制台编码已设置为: $($ansiEncoding.EncodingName)"
+          Write-Host "编码代码页: $($ansiEncoding.CodePage)"
 
       # ==============================================
       # 3. 安装并认证GitHub CLI

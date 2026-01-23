@@ -344,53 +344,103 @@ jobs:
             throw "No split volume files were created"
         }
 
-    # ========== 新增：删除旧Release和Tag ==========
-    - name: Delete existing release and tag
+    # ========== 自定义上传步骤（核心修改部分） ==========
+    - name: Upload release assets with custom control
       shell: pwsh
       run: |
+        # 配置参数（可按需调整）
         $targetName = "Windows7_ULT&ENT_32&64"
-        
-        # 检查并删除Release
-        try {
-            $releaseId = gh release view "$targetName" --json id --jq ".id" 2>&1
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "Found existing release: $targetName, deleting..."
-                gh release delete "$targetName" --cleanup-tag --yes
-            } else {
-                Write-Host "No existing release found for: $targetName"
-            }
-        }
-        catch {
-            Write-Host "No existing release found for: $targetName (error: $_)"
+        $maxRetries = 10          # 每个文件最大重试次数
+        $retryDelay = 30          # 重试间隔（秒）
+        $fileUploadInterval = 60  # 文件间上传间隔（秒）
+        $workDir = "workdir"
+        $githubToken = "${{ secrets.GITHUB_TOKEN }}"
+        $repo = "${{ github.repository }}"  # 格式：owner/repo
+
+        # 1. 创建Release（先创建Tag，再创建Release）
+        Write-Host "=== Creating tag and release ==="
+        # 创建Tag
+        git tag "$targetName"
+        git push origin "$targetName"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Tag creation may have failed, continuing to create release..."
         }
 
-        # 兜底检查并删除Tag（防止--cleanup-tag未生效）
-        try {
-            git ls-remote --tags origin "refs/tags/$targetName" 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "Found existing tag: $targetName, deleting..."
-                git push origin --delete "refs/tags/$targetName"
-            } else {
-                Write-Host "No existing tag found for: $targetName"
+        # 创建Release（使用gh cli，自动处理特殊字符）
+        gh release create "$targetName" `
+          --name "$targetName" `
+          --draft false `
+          --prerelease false `
+          --latest true
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create release: $targetName"
+        }
+
+        # 获取刚创建的Release ID（用于API上传）
+        $releaseId = gh release view "$targetName" --json id --jq ".id"
+        if (-not $releaseId) {
+            throw "Failed to get release ID for: $targetName"
+        }
+        Write-Host "Created release with ID: $releaseId"
+
+        # 2. 列出所有要上传的分片文件（按序号排序）
+        Write-Host "`n=== Finding split files ==="
+        $splitFiles = Get-ChildItem -Path "$workDir" -Filter "*.7z.*" | Sort-Object Name
+        if (-not $splitFiles -or $splitFiles.Count -eq 0) {
+            throw "No split 7z files found in $workDir"
+        }
+        Write-Host "Found $($splitFiles.Count) files to upload:"
+        $splitFiles | ForEach-Object { Write-Host "  - $($_.Name)" }
+
+        # 3. 逐个上传文件（带重试和间隔）
+        Write-Host "`n=== Starting file uploads ==="
+        foreach ($file in $splitFiles) {
+            $fileName = $file.Name
+            $filePath = $file.FullName
+            $fileSize = (Get-Item $filePath).Length / 1MB
+            Write-Host "`n--- Processing file: $fileName (Size: $($fileSize.ToString('0.00')) MB) ---"
+            
+            # 上传重试逻辑
+            $retryCount = 0
+            $uploadSuccess = $false
+            while ($retryCount -lt $maxRetries -and -not $uploadSuccess) {
+                try {
+                    # 使用gh cli上传（自动处理API认证和特殊字符）
+                    gh release upload "$targetName" "$filePath" --clobber
+                    
+                    # 检查上传结果
+                    if ($LASTEXITCODE -eq 0) {
+                        $uploadSuccess = $true
+                        Write-Host "✅ Successfully uploaded: $fileName (Attempt: $($retryCount + 1))"
+                    } else {
+                        throw "gh cli returned non-zero exit code: $LASTEXITCODE"
+                    }
+                }
+                catch {
+                    $retryCount++
+                    $remainingRetries = $maxRetries - $retryCount
+                    Write-Warning "❌ Failed to upload $fileName (Attempt: $retryCount/$maxRetries): $_"
+                    
+                    if ($remainingRetries -gt 0) {
+                        Write-Host "Waiting $retryDelay seconds before retry ($remainingRetries retries left)..."
+                        Start-Sleep -Seconds $retryDelay
+                    } else {
+                        throw "❌ Max retries ($maxRetries) reached for $fileName. Upload failed permanently."
+                    }
+                }
+            }
+
+            # 4. 上传成功后，间隔指定时间再传下一个
+            if ($uploadSuccess -and $file -ne $splitFiles[-1]) {
+                Write-Host "Waiting $fileUploadInterval seconds before next file upload..."
+                Start-Sleep -Seconds $fileUploadInterval
             }
         }
-        catch {
-            Write-Host "No existing tag found for: $targetName (error: $_)"
-        }
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # ========== 新增：上传资产到新Release ==========
-    - name: Upload release assets
-      uses: softprops/action-gh-release@v1
-      with:
-        name: Windows7_ULT&ENT_32&64
-        tag_name: Windows7_ULT&ENT_32&64
-        draft: false
-        prerelease: false
-        generate_release_notes: false
-        overwrite: false
-        files: |
-          workdir/Windows7_ULT&ENT_32&64.7z.*
+        Write-Host "`n=== All files processed ==="
+        # 验证上传结果
+        $uploadedAssets = gh release view "$targetName" --json assets --jq ".assets[].name"
+        Write-Host "Uploaded assets in release:"
+        $uploadedAssets | ForEach-Object { Write-Host "  - $_" }
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

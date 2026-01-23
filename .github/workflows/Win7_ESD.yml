@@ -1,19 +1,17 @@
 name: Windows_7_ULT&ENT_32&64
 
-# 触发方式：手动触发（推荐）+ 可选push触发
 on:
   workflow_dispatch:
   push:
-    branches: [ main ] # 可根据需要修改分支
+    branches: [ main ]
 
 jobs:
   build-and-upload-esd:
     runs-on: windows-latest
     defaults:
       run:
-        shell: cmd # 强制使用CMD shell
+        shell: cmd
     env:
-      # ========== 下载地址变量（用户提供，可直接修改） ==========
       install_Windows7x86ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
       install_Windows7x86ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
       install_Windows7x86ULTIMATE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
@@ -27,159 +25,126 @@ jobs:
       install_Windows7x64ENTERPRISE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
       install_Windows7x64ENTERPRISE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
       
-      # ========== 核心配置变量（可按需修改） ==========
-      ESD_NAME: "Windows_7_ULT&ENT_32&64.esd" # 最终ESD文件名
-      CHUNK_SIZE: "1950M" # 7z分卷大小
-      RETRY_TIMES: 10 # 上传重试次数
-      RETRY_INTERVAL: 30 # 重试间隔（秒）
-      TAG_NAME: "Windows7_ESD_Pack" # Release标签名
-      GITHUB_REPO: ${{ github.repository }} # 当前仓库（自动获取）
+      ESD_NAME: "Windows_7_ULT&ENT_32&64.esd"
+      CHUNK_SIZE: "1950M"
+      RETRY_TIMES: 10
+      RETRY_INTERVAL: 30
+      TAG_NAME: "Windows7_ESD_Pack"
+      GITHUB_REPO: ${{ github.repository }}
 
     steps:
-      # ========== 步骤1：检出代码（基础操作） ==========
       - name: 检出仓库代码
         uses: actions/checkout@v4
 
-      # ========== 步骤2：配置系统环境（ANSI编码、工具校验） ==========
       - name: 配置CMD编码和基础工具
         run: |
-          :: 设置CMD编码为ANSI（中文系统默认936）
           chcp 936
-          :: 验证curl可用性（环境默认）
           curl --version
-          :: 验证7z可用性（Windows-latest默认预装）
           "C:\Program Files\7-Zip\7z.exe" --version
-          :: 安装GitHub CLI（上传Release用）
           winget install --id GitHub.cli -e --silent
           gh --version
 
-      # ========== 步骤3：编写通用版本处理脚本（循环逻辑） ==========
-      - name: 生成版本处理脚本（复用逻辑）
+      # ========== 核心修复：修正变量转义问题 ==========
+      - name: 生成版本处理脚本（修复转义）
         run: |
-          :: 创建通用处理脚本，避免重复代码
           echo @echo off > process_version.bat
           echo setlocal enabledelayedexpansion >> process_version.bat
-          :: 参数说明：1=版本标识 2=分卷前缀 3=目标索引 4=分卷数量
-          echo set "VER_ID=!1!" >> process_version.bat
-          echo set "VOL_PREFIX=!2!" >> process_version.bat
-          echo set "TARGET_INDEX=!3!" >> process_version.bat
-          echo set "VOL_COUNT=!4!" >> process_version.bat
+          echo set "VER_ID=%%1" >> process_version.bat
+          echo set "VOL_PREFIX=%%2" >> process_version.bat
+          echo set "TARGET_INDEX=%%3" >> process_version.bat
+          echo set "VOL_COUNT=%%4" >> process_version.bat
           echo. >> process_version.bat
           
-          :: 子步骤1：下载分卷文件
-          echo :: ===================== 下载%VER_ID%分卷 ===================== >> process_version.bat
-          echo for /L %%i in (1,1,!VOL_COUNT!) do ( >> process_version.bat
-          echo   set "VOL_NUM=00%%i" && set "VOL_NUM=!VOL_NUM:~-3!" >> process_version.bat
-          echo   set "FILE_NAME=!VOL_PREFIX!_!VOL_NUM!" >> process_version.bat
-          echo   set "DOWN_URL=!%FILE_NAME%!" >> process_version.bat
+          :: 下载分卷（修复%i转义为%%i）
+          echo :: ===================== 下载%%VER_ID%%分卷 ===================== >> process_version.bat
+          echo for /L %%i in (1,1,%%VOL_COUNT%%) do ( >> process_version.bat
+          echo   set "VOL_NUM=00%%i" ^&^& set "VOL_NUM=!VOL_NUM:~-3!" >> process_version.bat
+          echo   set "FILE_NAME=%%VOL_PREFIX%%_!VOL_NUM!" >> process_version.bat
+          echo   set "DOWN_URL=!%%FILE_NAME%%!" >> process_version.bat
           echo   echo 正在下载："!FILE_NAME!" >> process_version.bat
           echo   curl -L -o "!FILE_NAME!" "!DOWN_URL!" >> process_version.bat
-          echo   if errorlevel 1 (echo 下载"!FILE_NAME!"失败 && exit /b 1) >> process_version.bat
+          echo   if errorlevel 1 (echo 下载"!FILE_NAME!"失败 ^&^& exit /b 1) >> process_version.bat
           echo ) >> process_version.bat
           echo. >> process_version.bat
           
-          :: 子步骤2：解压分卷文件
-          echo :: ===================== 解压%VER_ID%分卷 ===================== >> process_version.bat
-          echo echo 正在解压："!VOL_PREFIX!_001" >> process_version.bat
-          echo "C:\Program Files\7-Zip\7z.exe" x -y "!VOL_PREFIX!_001" -o"!VER_ID!_temp" >> process_version.bat
-          echo if errorlevel 1 (echo 解压失败 && exit /b 1) >> process_version.bat
+          :: 解压分卷
+          echo :: ===================== 解压%%VER_ID%%分卷 ===================== >> process_version.bat
+          echo echo 正在解压："%%VOL_PREFIX%%_001" >> process_version.bat
+          echo "C:\Program Files\7-Zip\7z.exe" x -y "%%VOL_PREFIX%%_001" -o"%%VER_ID%%_temp" >> process_version.bat
+          echo if errorlevel 1 (echo 解压失败 ^&^& exit /b 1) >> process_version.bat
           echo. >> process_version.bat
           
-          :: 子步骤3：查找WIM文件
-          echo :: ===================== 查找%VER_ID%的WIM文件 ===================== >> process_version.bat
-          echo for /f "delims=" %%f in ('dir /b "!VER_ID!_temp\*.wim"') do set "WIM_FILE=!VER_ID!_temp\%%f" >> process_version.bat
-          echo if not defined WIM_FILE (echo 未找到WIM文件 && exit /b 1) >> process_version.bat
+          :: 查找WIM文件
+          echo :: ===================== 查找%%VER_ID%%的WIM文件 ===================== >> process_version.bat
+          echo for /f "delims=" %%f in ('dir /b "%%VER_ID%%_temp\*.wim"') do set "WIM_FILE=%%VER_ID%%_temp\%%f" >> process_version.bat
+          echo if not defined WIM_FILE (echo 未找到WIM文件 ^&^& exit /b 1) >> process_version.bat
           echo echo 找到WIM文件："!WIM_FILE!" >> process_version.bat
           echo. >> process_version.bat
           
-          :: 子步骤4：转换/追加ESD
+          :: 转换/追加ESD
           echo :: ===================== 转换为ESD ===================== >> process_version.bat
           echo if not exist "%ESD_NAME%" ( >> process_version.bat
-          echo   :: 首次转换：创建新ESD >> process_version.bat
-          echo   dism /export-image /SourceImageFile:"!WIM_FILE!" /SourceIndex:!TARGET_INDEX! /DestinationImageFile:"%ESD_NAME%" /Compress:recovery /CheckIntegrity >> process_version.bat
+          echo   dism /export-image /SourceImageFile:"!WIM_FILE!" /SourceIndex:%%TARGET_INDEX%% /DestinationImageFile:"%ESD_NAME%" /Compress:recovery /CheckIntegrity >> process_version.bat
           echo ) else ( >> process_version.bat
-          echo   :: 非首次：追加到现有ESD >> process_version.bat
-          echo   dism /export-image /SourceImageFile:"!WIM_FILE!" /SourceIndex:!TARGET_INDEX! /DestinationImageFile:"%ESD_NAME%" /Compress:recovery /CheckIntegrity /Append >> process_version.bat
+          echo   dism /export-image /SourceImageFile:"!WIM_FILE!" /SourceIndex:%%TARGET_INDEX%% /DestinationImageFile:"%ESD_NAME%" /Compress:recovery /CheckIntegrity /Append >> process_version.bat
           echo ) >> process_version.bat
-          echo if errorlevel 1 (echo ESD转换失败 && exit /b 1) >> process_version.bat
+          echo if errorlevel 1 (echo ESD转换失败 ^&^& exit /b 1) >> process_version.bat
           echo. >> process_version.bat
           
-          :: 子步骤5：清理临时文件
+          :: 清理临时文件（修复%i转义）
           echo :: ===================== 清理临时文件 ===================== >> process_version.bat
-          echo echo 清理%VER_ID%临时文件... >> process_version.bat
-          echo rmdir /s /q "!VER_ID!_temp" >> process_version.bat
-          echo for /L %%i in (1,1,!VOL_COUNT!) do ( >> process_version.bat
-          echo   set "VOL_NUM=00%%i" && set "VOL_NUM=!VOL_NUM:~-3!" >> process_version.bat
-          echo   del /f /q "!VOL_PREFIX!_!VOL_NUM!" >> process_version.bat
+          echo echo 清理%%VER_ID%%临时文件... >> process_version.bat
+          echo rmdir /s /q "%%VER_ID%%_temp" >> process_version.bat
+          echo for /L %%i in (1,1,%%VOL_COUNT%%) do ( >> process_version.bat
+          echo   set "VOL_NUM=00%%i" ^&^& set "VOL_NUM=!VOL_NUM:~-3!" >> process_version.bat
+          echo   del /f /q "%%VOL_PREFIX%%_!VOL_NUM!" >> process_version.bat
           echo ) >> process_version.bat
           echo endlocal >> process_version.bat
 
-      # ========== 步骤4：处理x86旗舰版（索引5） ==========
       - name: 处理Windows7 x86旗舰版
         run: |
-          :: ===================== 处理x86旗舰版 =====================
           call process_version.bat x86ULT install_Windows7x86ULTIMATE 5 3
           if errorlevel 1 (echo 处理x86旗舰版失败 && exit /b 1)
 
-      # ========== 步骤5：处理x86企业版（索引1） ==========
       - name: 处理Windows7 x86企业版
         run: |
-          :: ===================== 处理x86企业版 =====================
           call process_version.bat x86ENT install_Windows7x86ENTERPRISE 1 3
           if errorlevel 1 (echo 处理x86企业版失败 && exit /b 1)
 
-      # ========== 步骤6：处理x64旗舰版（索引4） ==========
       - name: 处理Windows7 x64旗舰版
         run: |
-          :: ===================== 处理x64旗舰版 =====================
           call process_version.bat x64ULT install_Windows7x64ULTIMATE 4 3
           if errorlevel 1 (echo 处理x64旗舰版失败 && exit /b 1)
 
-      # ========== 步骤7：处理x64企业版（索引1） ==========
       - name: 处理Windows7 x64企业版
         run: |
-          :: ===================== 处理x64企业版 =====================
           call process_version.bat x64ENT install_Windows7x64ENTERPRISE 1 3
           if errorlevel 1 (echo 处理x64企业版失败 && exit /b 1)
 
-      # ========== 步骤8：7z分卷压缩ESD文件 ==========
       - name: 分卷压缩ESD文件（1950M）
         run: |
-          :: ===================== 7z分卷压缩 =====================
           echo 开始分卷压缩ESD文件，分卷大小：%CHUNK_SIZE%
           "C:\Program Files\7-Zip\7z.exe" a -v%CHUNK_SIZE% -y "%ESD_NAME%.7z" "%ESD_NAME%"
           if errorlevel 1 (echo 分卷压缩失败 && exit /b 1)
-          :: 删除原始ESD（节省空间）
           del /f /q "%ESD_NAME%"
-          :: 验证分卷文件
           dir /b "%ESD_NAME%.7z.*"
 
-      # ========== 步骤9：配置GH CLI认证 ==========
       - name: 认证GitHub CLI
         run: |
-          :: ===================== GH CLI认证 =====================
-          echo 配置GH CLI认证...
           echo ${{ secrets.GITHUB_TOKEN }} | gh auth login --with-token
           gh auth status
           if errorlevel 1 (echo GH CLI认证失败 && exit /b 1)
 
-      # ========== 步骤10：删除原有Release和Tag ==========
       - name: 删除原有Release和Tag
         run: |
-          :: ===================== 删除旧版本 =====================
-          echo 删除原有Tag：%TAG_NAME%
           gh release delete %TAG_NAME% -y --repo %GITHUB_REPO% 2>nul || echo 无原有Release，跳过
           git tag -d %TAG_NAME% 2>nul || echo 无原有Tag，跳过
           git push origin --delete %TAG_NAME% 2>nul || echo 推送删除Tag失败（可能不存在）
 
-      # ========== 步骤11：上传分卷文件（带重试） ==========
       - name: 上传分卷文件到Release（重试10次）
         run: |
-          :: ===================== 上传文件（带重试） =====================
-          echo 创建新Release：%TAG_NAME%
           gh release create %TAG_NAME% --title "%ESD_NAME%" --notes "Windows7 ESD打包文件" --repo %GITHUB_REPO%
           
-          :: 重试逻辑
           set "RETRY=0"
           :UPLOAD_LOOP
           if !RETRY! geq %RETRY_TIMES% (echo 上传重试达上限 && exit /b 1)
@@ -197,12 +162,9 @@ jobs:
           )
           echo 所有分卷文件上传完成
 
-      # ========== 步骤12：最终清理（无论成败） ==========
       - name: 清理所有临时文件
         if: always()
         run: |
-          :: ===================== 最终清理 =====================
-          echo 清理临时文件...
           del /f /q process_version.bat
           del /f /q install_Windows7*
           del /f /q "%ESD_NAME%.7z.*"

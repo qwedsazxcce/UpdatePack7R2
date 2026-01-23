@@ -32,7 +32,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Delete existing Release and Tag
+      - name: Delete existing Release and Tag (gh cli)
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -40,15 +40,15 @@ jobs:
           $releaseName = $env:RELEASE_NAME
           Write-Host "清理旧版本：$releaseName"
           
-          # 极简删除逻辑：仅当资源存在时才删除，避免命令卡住
-          # 1. 删除本地Tag（仅当存在时）
+          # ===== 用gh cli删除Release（核心：即使不存在也不报错）=====
+          # -y：自动确认删除；2>&1：重定向错误输出；|| $true：即使失败也返回true（避免流程退出）
+          gh release delete "$releaseName" -y 2>&1 | Out-Null || $true
+          
+          # ===== 用gh cli删除Tag（远程+本地，不存在则跳过）=====
+          # 先删除远程Tag
+          gh api --method DELETE "/repos/${{ github.repository }}/git/refs/tags/$releaseName" 2>&1 | Out-Null || $true
+          # 再删除本地Tag（存在则删）
           if (git tag --list "$releaseName") { git tag -d "$releaseName" }
-          # 2. 删除远程Tag（静默执行，失败不阻塞）
-          git push origin --delete "$releaseName" 2>&1 | Out-Null
-          # 3. 删除Release（用API极简调用，比gh cli快10倍，失败不阻塞）
-          try {
-            gh api --method DELETE "/repos/${{ github.repository }}/releases/tags/$releaseName" -q "."
-          } catch { Write-Host "旧Release不存在，跳过删除" }
 
       - name: Process each Windows 7 version
         shell: pwsh

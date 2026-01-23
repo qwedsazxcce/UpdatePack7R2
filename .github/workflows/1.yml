@@ -3,134 +3,158 @@ on:
   push:
     branches: ["main"]
     paths:
-      - '.github/1.yml'
-      
+      - '.github/1.yml'  # 仅修改此文件并推送到main分支时触发
+
 jobs:
   test-compress-upload:
-    runs-on: windows-latest
+    runs-on: windows-latest  # 必须用Windows环境，保证命令兼容
     env:
-      # ========== 核心配置（和之前保持一致） ==========
+      # ========== 核心配置 ==========
       WORK_DIR: ${{ github.workspace }}
-      ESD_FILE_NAME: Windows_7_ULT&ENT_32&64.esd  # 目标文件名
-      SPLIT_SIZE: 1950M                           # 分卷大小
-      RETRY_COUNT: 10                             # 上传重试次数
-      RETRY_INTERVAL: 30                          # 重试间隔（秒）
-      RELEASE_NAME: Windows_7_ULT&ENT_32&64       # Release名称
-      # 待下载的文件URL
+      ESD_FILE_NAME: Windows_7_ULT&ENT_32&64.esd
+      SPLIT_SIZE: 1950M
+      RETRY_COUNT: 3  # 测试时减少重试次数，加快排查
+      RETRY_INTERVAL: 10
+      RELEASE_NAME: Windows7_ULT&ENT_32&64
       DOWNLOAD_URL: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
 
     steps:
-      # 步骤1：检出仓库（保持和之前一致的基础步骤）
+      # 步骤1：检出仓库（基础步骤）
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1  # 仅拉取最新代码，加快速度
 
-      # 步骤2：下载文件并直接命名为目标ESD文件（核心测试步骤）
-      - name: Download file and rename to ESD
+      # 步骤2：调试 - 输出环境信息（定位路径/变量问题）
+      - name: Debug - Print env info
         shell: pwsh
         run: |
-          Write-Host "开始下载文件：$env:DOWNLOAD_URL"
-          # 拼接目标文件路径（工作目录+指定ESD文件名）
+          Write-Host "=== 环境信息 ==="
+          Write-Host "工作目录：$env:WORK_DIR"
+          Write-Host "ESD文件名：$env:ESD_FILE_NAME"
+          Write-Host "Release名称：$env:RELEASE_NAME"
+          Write-Host "系统路径：$(Get-Location)"
+          Write-Host "7z版本：$(7z --version | Select-Object -First 1)"
+          Write-Host "GH CLI版本：$(gh --version | Select-Object -First 1)"
+
+      # 步骤3：下载文件并命名为目标ESD（带调试）
+      - name: Step 1 - Download & rename file
+        shell: pwsh
+        run: |
+          Write-Host "=== 开始下载文件 ==="
           $targetFilePath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_FILE_NAME
-          # 用原版curl下载，直接命名为目标ESD文件
-          curl.exe -L -o "$targetFilePath" "$env:DOWNLOAD_URL"
+          Write-Host "下载URL：$env:DOWNLOAD_URL"
+          Write-Host "保存路径：$targetFilePath"
           
-          # 校验下载结果
+          # 下载文件（带进度日志）
+          curl.exe -L -o "$targetFilePath" "$env:DOWNLOAD_URL"
           if ($LASTEXITCODE -ne 0) {
-            throw "文件下载失败，curl退出码：$LASTEXITCODE"
+            throw "下载失败，curl退出码：$LASTEXITCODE"
           }
-          $fileSize = (Get-Item "$targetFilePath").Length
-          if ($fileSize -eq 0) {
-            throw "下载的文件为空（大小0字节）"
+          
+          # 验证文件存在并输出大小
+          if (Test-Path $targetFilePath) {
+            $fileSize = (Get-Item "$targetFilePath").Length
+            Write-Host "✅ 下载成功！文件大小：$([math]::Round($fileSize/1MB,2)) MB"
+          } else {
+            throw "❌ 下载后的文件不存在！"
           }
-          Write-Host "✅ 文件下载成功并命名为：$env:ESD_FILE_NAME"
-          Write-Host "文件大小：$([math]::Round($fileSize/1MB,2)) MB"
 
-      # 步骤3：分卷压缩（完全复用之前修复的代码）
-      - name: Split compress ESD file
+      # 步骤4：分卷压缩（带详细日志，确保执行）
+      - name: Step 2 - Split compress ESD
         shell: pwsh
         run: |
-          Write-Host "开始分卷压缩 ESD 文件"
-          # 源ESD文件路径
+          Write-Host "=== 开始分卷压缩 ==="
           $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_FILE_NAME
-          # 分卷压缩输出路径（后缀为.7z）
           $splitOutput = Join-Path -Path $env:WORK_DIR -ChildPath "$($env:ESD_FILE_NAME).7z"
           
-          # 核心修复：预拼接-v参数，避免$符号解析错误
+          # 验证源文件存在
+          if (-not (Test-Path $esdPath)) {
+            throw "❌ 源ESD文件不存在：$esdPath"
+          }
+          
+          # 拼接7z参数并执行
           $volParam = "-v$($env:SPLIT_SIZE)"
-          # 执行7z分卷压缩
+          Write-Host "7z命令：7z a -y $volParam `"$splitOutput`" `"$esdPath`""
           7z a -y $volParam "$splitOutput" "$esdPath"
           
-          # 校验压缩结果
+          # 验证压缩结果
           if ($LASTEXITCODE -ge 2) {
-            throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
+            throw "❌ 7z压缩失败，退出码：$LASTEXITCODE"
           }
-          Write-Host "✅ ESD文件分卷压缩完成"
+          
+          # 列出压缩后的分卷文件
+          $splitFiles = Get-ChildItem -LiteralPath $env:WORK_DIR -Filter "$($env:ESD_FILE_NAME).7z.*"
+          if ($splitFiles.Count -eq 0) {
+            throw "❌ 未生成任何分卷文件！"
+          }
+          Write-Host "✅ 压缩成功！生成分卷文件："
+          $splitFiles | ForEach-Object { Write-Host "  - $($_.FullName)" }
 
-      # 步骤4：上传到GitHub Release（完全复用之前修复的代码）
-      - name: Upload to GitHub Release
+      # 步骤5：上传到GitHub Release（带完整调试日志）
+      - name: Step 3 - Upload to Release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          Write-Host "=== 开始上传到Release ==="
           $releaseName = $env:RELEASE_NAME
-          # 用LiteralPath处理含&的路径，避免解析错误
-          $splitFiles = Get-ChildItem -LiteralPath "$env:WORK_DIR" -Filter "$($env:ESD_FILE_NAME).7z.*" -ErrorAction Stop
-          $retryCount = [int]$env:RETRY_COUNT
-          $retryInterval = [int]$env:RETRY_INTERVAL
+          $splitFiles = Get-ChildItem -LiteralPath $env:WORK_DIR -Filter "$($env:ESD_FILE_NAME).7z.*" -ErrorAction Stop
+          
+          # 1. 验证分卷文件存在
+          if ($splitFiles.Count -eq 0) {
+            throw "❌ 无分卷文件可上传！"
+          }
+          Write-Host "待上传文件数：$($splitFiles.Count)"
+          $splitFiles | ForEach-Object { Write-Host "  - 待上传：$($_.FullName)" }
 
-          # 删除原有Release/Tag（测试用，可保留）
-          Write-Host "删除原有Release/Tag：$releaseName"
+          # 2. 删除旧Release/Tag（带日志）
+          Write-Host "=== 删除旧Release/Tag ==="
           gh release delete "$releaseName" -y 2>&1 | Out-Null
+          Write-Host "已删除旧Release：$releaseName"
           git tag -d "$releaseName" 2>&1 | Out-Null
           git push origin --delete "$releaseName" 2>&1 | Out-Null
+          Write-Host "已删除旧Tag：$releaseName"
 
-          # 前置检查：确保分卷文件存在
-          if ($splitFiles.Count -eq 0) {
-            throw "未找到分卷压缩文件！路径：$env:WORK_DIR\$($env:ESD_FILE_NAME).7z.*"
-          }
-          Write-Host "待上传分卷文件数：$($splitFiles.Count)"
-
-          # 上传重试逻辑
+          # 3. 上传重试逻辑（带详细日志）
           $uploadSuccess = $false
-          for ($i=1; $i -le $retryCount; $i++) {
+          for ($i=1; $i -le $env:RETRY_COUNT; $i++) {
             try {
-              Write-Host "第 $i 次上传（共 $retryCount 次）"
-              # 创建Release
-              gh release create "$releaseName" --title "$releaseName" --notes "Test: Compress & Upload ESD"
-              # 上传所有分卷（移除重复引号，处理特殊字符）
+              Write-Host "=== 第 $i 次上传尝试 ==="
+              # 创建Release（带详细输出）
+              Write-Host "创建Release：$releaseName"
+              gh release create "$releaseName" --title "$releaseName" --notes "Test: Compress & Upload ESD (Test Run)" --debug
+              
+              # 逐个上传文件（带结果日志）
               foreach ($file in $splitFiles) {
                 Write-Host "上传文件：$($file.FullName)"
-                gh release upload "$releaseName" "$($file.FullName)" --clobber
+                gh release upload "$releaseName" "$($file.FullName)" --clobber --debug
+                Write-Host "✅ 单个文件上传成功：$($file.Name)"
               }
+              
               $uploadSuccess = $true
-              Write-Host "✅ 所有文件上传成功"
+              Write-Host "✅ 所有文件上传成功！"
               break
             }
             catch {
-              Write-Warning "第 $i 次上传失败：$($_.Exception.Message)"
-              if ($i -lt $retryCount) {
-                Write-Host "等待 $retryInterval 秒后重试..."
-                Start-Sleep -Seconds $retryInterval
+              Write-Warning "❌ 第 $i 次上传失败：$($_.Exception.Message)"
+              if ($i -lt $env:RETRY_COUNT) {
+                Write-Host "等待 $($env:RETRY_INTERVAL) 秒后重试..."
+                Start-Sleep -Seconds $env:RETRY_INTERVAL
               }
             }
           }
 
-          # 最终校验
+          # 4. 最终验证
           if (-not $uploadSuccess) {
-            throw "重试 $retryCount 次后仍上传失败"
+            throw "❌ 重试 $($env:RETRY_COUNT) 次后仍上传失败！"
           }
+          Write-Host "=== 上传流程全部完成 ==="
 
-      # 步骤5：最终清理（可选，测试完成后清理临时文件）
-      - name: Final cleanup
-        shell: pwsh
-        if: always()
-        run: |
-          Write-Host "执行清理操作"
-          # 删除原始ESD文件
-          $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_FILE_NAME
-          if (Test-Path $esdPath) {
-            Remove-Item -Path $esdPath -Force
-          }
-          # 删除分卷压缩文件
-          Get-ChildItem -Path $env:WORK_DIR -Filter "$($env:ESD_FILE_NAME).7z.*" | Remove-Item -Force -ErrorAction SilentlyContinue
-          Write-Host "✅ 清理完成"
+      # 步骤6：可选 - 上传到Artifact（备用验证）
+      - name: Step 4 - Upload to Artifact (Backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Test-ESD-Split-Files
+          path: ${{ env.WORK_DIR }}\${{ env.ESD_FILE_NAME }}.7z.*
+          retention-days: 7  # 仅保留7天，节省空间

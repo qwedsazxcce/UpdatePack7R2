@@ -15,39 +15,41 @@ env:
   install_Windows7x64ENTERPRISE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001
   install_Windows7x64ENTERPRISE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
   install_Windows7x64ENTERPRISE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
-  # 全局配置
-  MAIN_ESD_NAME: Windows_7_ULT&ENT_32&64.esd
+  # 全局配置（含&符号，全程引号包裹）
+  MAIN_ESD_NAME: "Windows_7_ULT&ENT_32&64.esd"
   SPLIT_VOLUME_SIZE: 1950M
-  RELEASE_TAG: Windows_7_ULT&ENT_32&64
+  RELEASE_TAG: "Windows_7_ULT&ENT_32&64"
 
 jobs:
   process_and_upload:
     runs-on: windows-latest
     defaults:
       run:
-        shell: cmd  # 全程使用CMD，而非PowerShell
+        shell: cmd  # 全程CMD，适配ANSI编码
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 初始化ESD文件
+      - name: 初始化ESD文件（修复&符号解析）
         run: |
+          @echo off
+          chcp 936 > nul 2>&1
+          :: 关键：含&的变量必须双引号包裹
           if exist "%MAIN_ESD_NAME%" del /f /q "%MAIN_ESD_NAME%"
           type nul > "%MAIN_ESD_NAME%"
           echo ESD文件初始化完成：%MAIN_ESD_NAME%
 
-      - name: 核心流程（下载→解压→转换，CMD原生处理）
+      - name: 核心流程（修复3次重试逻辑）
         run: |
           @echo off
-          chcp 936 > nul 2>&1  # 强制设置CMD编码为GBK（ANSI）
+          chcp 936 > nul 2>&1
           
-          :: 定义版本列表（CMD批量处理）
+          :: 定义版本列表
           set "VERSIONS=Windows7x86ULTIMATE:5:3 Windows7x86ENTERPRISE:1:3 Windows7x64ULTIMATE:4:3 Windows7x64ENTERPRISE:1:3"
           
           :: 遍历所有版本
           for %%v in (%VERSIONS%) do (
-            :: 拆分版本信息：名称:索引:分卷数
             for /f "tokens=1,2,3 delims=:" %%a in ("%%v") do (
               set "VER_NAME=%%a"
               set "ESD_INDEX=%%b"
@@ -60,16 +62,14 @@ jobs:
             echo 处理：!VER_NAME!（索引：!ESD_INDEX!）
             echo =====================================
             
-            :: 1. 下载分卷（带3次重试）
+            :: 1. 下载分卷（标准3次重试逻辑）
             echo 1. 下载!VER_NAME!分卷
             set "DOWNLOAD_SUCCESS=1"
             for /l %%i in (1,1,!PART_COUNT!) do (
-              :: 补零生成分卷号（001/002/003）
               set "PART_NUM=00%%i"
               set "PART_NUM=!PART_NUM:~-3!"
               
-              :: 获取下载URL
-              set "URL=!install_!VER_NAME!_!PART_NUM!!"
+              :: 获取下载URL（修复变量引用）
               call set "URL=%%install_!VER_NAME!_!PART_NUM!%%"
               set "SAVE_PATH=!VER_NAME!.7z.!PART_NUM!"
               
@@ -79,14 +79,15 @@ jobs:
                 goto :NEXT_VER
               )
               
-              :: 下载重试逻辑
+              :: 初始化重试计数为0
               set "RETRY=0"
               :DOWNLOAD_RETRY
               set "RETRY_SUCCESS=0"
               if exist "!SAVE_PATH!" del /f /q "!SAVE_PATH!"
+              :: 执行下载
               curl.exe -L -o "!SAVE_PATH!" "!URL!" --connect-timeout 30 --max-time 300
               if !errorlevel! equ 0 (
-                :: 校验文件大小（大于1KB）
+                :: 校验文件大小（大于1KB才算成功）
                 for %%f in ("!SAVE_PATH!") do if %%~zf gtr 1024 set "RETRY_SUCCESS=1"
               )
               
@@ -94,13 +95,15 @@ jobs:
                 for %%f in ("!SAVE_PATH!") do echo !VER_NAME! 分卷%%i 下载成功：%%~zf 字节
                 goto :DOWNLOAD_NEXT
               ) else (
-                set /a RETRY+=3
+                :: 关键修复1：重试计数+1（而非+3）
+                set /a RETRY+=1
                 echo 警告：!VER_NAME! 分卷%%i 下载失败，重试!RETRY!/3
+                :: 关键修复2：如果重试次数小于3，继续重试
                 if !RETRY! lss 3 (
                   timeout /t 5 /nobreak > nul
                   goto :DOWNLOAD_RETRY
                 ) else (
-                  echo 错误：!VER_NAME! 分卷%%i 下载重试3次失败，跳过
+                  echo 错误：!VER_NAME! 分卷%%i 重试3次仍失败，跳过
                   set "DOWNLOAD_SUCCESS=0"
                   goto :NEXT_VER
                 )
@@ -135,7 +138,7 @@ jobs:
             )
             for %%f in ("!WIM_PATH!") do echo 找到WIM：%%~ff（大小：%%~zf 字节）
             
-            :: 4. 读取WIM信息（CMD原生解析ANSI输出，无编码转换）
+            :: 4. 读取WIM信息（ANSI原生解析，无乱码）
             echo 4. 读取索引!ESD_INDEX!的WIM信息
             dism.exe /Get-WimInfo /WimFile:"!WIM_PATH!" /Index:!ESD_INDEX! > dism_temp.txt 2>&1
             if !errorlevel! neq 0 (
@@ -143,7 +146,7 @@ jobs:
               goto :CONVERT_ESD
             )
             
-            :: 解析WIM名称和描述（ANSI直接匹配，无乱码）
+            :: 解析WIM名称和描述
             for /f "tokens=2,* delims=:" %%a in ('findstr /i /c:"Name:" dism_temp.txt') do set "IMAGE_NAME=%%b"
             for /f "tokens=2,* delims=:" %%a in ('findstr /i /c:"Description:" dism_temp.txt') do set "IMAGE_DESC=%%b"
             set "IMAGE_NAME=!IMAGE_NAME: =!"
@@ -214,7 +217,7 @@ jobs:
           :: 删除旧Release
           gh release delete "%RELEASE_TAG%" -y > nul 2>&1
           
-          :: 创建新Release
+          :: 创建新Release（获取当前时间）
           for /f "tokens=*" %%a in ('powershell -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "BUILD_TIME=%%a"
           gh release create "%RELEASE_TAG%" --title "%RELEASE_TAG%" --notes "Windows7 ESD构建时间：!BUILD_TIME!"
           

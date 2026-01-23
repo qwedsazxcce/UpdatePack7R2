@@ -37,13 +37,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 仅设置编码，无多余操作
       - name: Set system encoding to GBK
         run: |
           chcp 936 | Out-Null
           Write-Host "System encoding set to GBK (936)"
 
-      # 初始化ESD文件，极简逻辑
       - name: Initialize ESD file
         run: |
           $mainESD = $env:MAIN_ESD_NAME
@@ -51,10 +49,9 @@ jobs:
           New-Item -Path $mainESD -ItemType File -Force | Out-Null
           Write-Host "ESD file initialized: $mainESD"
 
-      # 核心流程：下载→解压→转换→分卷
       - name: Core workflow
         run: |
-          # 函数1：下载分卷
+          # 函数1：下载分卷（修复语法错误）
           function Download-7zParts {
             param([string]$VerName, [int]$PartCount)
             $success = $true
@@ -84,7 +81,8 @@ jobs:
                 }
                 catch {
                   $retry++
-                  Write-Warning "Retry $retry/3 for $VerName part $i: $_"
+                  # 核心修复：冒号后加空格，避免变量解析错误
+                  Write-Warning "Retry $retry/3 for $VerName part $i : $_"
                   if ($retry -eq 3) {
                     $success = $false
                     break
@@ -98,7 +96,7 @@ jobs:
             return $success
           }
 
-          # 函数2：读取WIM信息（无编码变量，直接用Default）
+          # 函数2：读取WIM信息
           function Get-WimIndexInfo {
             param([string]$WimPath, [int]$TargetIndex)
             $tempOut = "dism_out.txt"
@@ -108,20 +106,17 @@ jobs:
             if (Test-Path $tempErr) { Remove-Item $tempErr -Force }
 
             try {
-              # 执行DISM，强制GBK环境
               cmd /c "chcp 936 && dism.exe /Get-WimInfo /WimFile:`"$WimPath`" /Index:$TargetIndex > $tempOut 2> $tempErr"
               if ($LASTEXITCODE -ne 0) {
                 $errMsg = Get-Content $tempErr -Encoding Default -Raw
                 throw "DISM execution failed: $errMsg"
               }
 
-              # 读取输出，无Null风险
               $dismOut = Get-Content $tempOut -Encoding Default -Raw
               if ([string]::IsNullOrWhiteSpace($dismOut)) {
                 throw "DISM output is empty"
               }
 
-              # 解析字段
               $name = [regex]::Match($dismOut, '(?mi)^Name\s*:\s*(.+)').Groups[1].Value.Trim()
               $desc = [regex]::Match($dismOut, '(?mi)^Description\s*:\s*(.+)').Groups[1].Value.Trim()
               $indexes = [regex]::Matches($dismOut, '(?mi)^Index\s*:\s*(\d+)').Groups | Where-Object { $_.Success } | ForEach-Object { [int]$_.Groups[1].Value }
@@ -218,7 +213,6 @@ jobs:
             Remove-Item "$verName.7z.*" -Force -ErrorAction SilentlyContinue
           }
 
-      # 分卷压缩
       - name: Split ESD to 7z
         run: |
           $mainESD = $env:MAIN_ESD_NAME
@@ -239,7 +233,6 @@ jobs:
           Write-Host "Split success, generated $($splitFiles.Count) files"
           Remove-Item $mainESD -Force
 
-      # 发布Release（利用预装gh，无安装步骤）
       - name: Publish to GitHub Release
         run: |
           $releaseTag = "Windows_7_ULT&ENT_32&64"
@@ -250,7 +243,6 @@ jobs:
             throw "No split files to upload"
           }
 
-          # 简化发布逻辑，无多余认证
           gh release delete $releaseTag -y 2>&1 | Out-Null
           gh release create $releaseTag `
             --title "$releaseTag" `
@@ -264,7 +256,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 最终清理
       - name: Final cleanup
         run: |
           Write-Host "Final cleanup"

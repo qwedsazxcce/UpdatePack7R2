@@ -8,9 +8,8 @@ on:
 jobs:
   build-and-upload-esd:
     runs-on: windows-latest
-    permissions:  # 核心修复：添加删除Release/Tag所需的权限
-      contents: write  # 删Tag必需
-      releases: write  # 删Release必需
+    permissions:  # 修正语法错误：仅保留合法的contents权限（管理Release/Tag的核心权限）
+      contents: write
     env:
       install_Windows7x86ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
       install_Windows7x86ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
@@ -110,7 +109,6 @@ jobs:
               $url = [Environment]::GetEnvironmentVariable($varName)
               if (-not $url) {
                 Write-Warning "变量 $varName 未定义，跳过该分卷"
-                continue
               }
               $fileName = "$prefix.7z.$vol"
               $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName

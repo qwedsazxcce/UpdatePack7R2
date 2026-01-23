@@ -3,7 +3,7 @@ on:
   push:
     branches: ["main"]  # 提交任意分支代码都触发工作流
     paths:
-      - '.github/workflows//Windows_7_ULT.ENT_32.64.yml'  # 仅修改这个工作流文件时触发
+      - '.github/workflows/Windows_7_ULT.ENT_32.64.yml'  # 仅修改这个工作流文件时触发
       # 可选：如果有其他需要触发的文件（如版本配置文件），可追加
       # - 'config/windows7-download-urls.yml'
 jobs:

@@ -37,28 +37,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 关键：强制设置CMD编码为GBK，解决DISM中文乱码
+      # 仅设置编码，无多余操作
       - name: Set system encoding to GBK
         run: |
-          # 永久设置当前会话编码为GBK（针对DISM）
           chcp 936 | Out-Null
-          Write-Host "System encoding set to GBK (936) for DISM Chinese support"
+          Write-Host "System encoding set to GBK (936)"
 
-      - name: Install dependencies
-        run: |
-          # 安装GitHub CLI
-          if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
-            winget install --id GitHub.cli --silent --accept-package-agreements --accept-source-agreements
-          }
-          # 校验7z
-          if (-not (Get-Command 7z -ErrorAction SilentlyContinue)) {
-            throw "7z.exe is required"
-          }
-          # 认证GH
-          $env:GH_TOKEN | gh auth login --with-token
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
+      # 初始化ESD文件，极简逻辑
       - name: Initialize ESD file
         run: |
           $mainESD = $env:MAIN_ESD_NAME
@@ -66,9 +51,10 @@ jobs:
           New-Item -Path $mainESD -ItemType File -Force | Out-Null
           Write-Host "ESD file initialized: $mainESD"
 
-      - name: Core workflow (download -> extract -> convert)
+      # 核心流程：下载→解压→转换→分卷
+      - name: Core workflow
         run: |
-          # 函数1：下载分卷（稳定重试逻辑）
+          # 函数1：下载分卷
           function Download-7zParts {
             param([string]$VerName, [int]$PartCount)
             $success = $true
@@ -78,92 +64,84 @@ jobs:
               $savePath = "$VerName.7z.$partNum"
               
               if (-not $url) {
-                Write-Error "No URL for $VerName part $i"
+                Write-Error "URL is empty for $VerName part $i"
                 $success = $false
                 continue
               }
 
-              # 3次重试下载
-              $retryCount = 0
+              $retry = 0
               do {
                 try {
                   if (Test-Path $savePath) { Remove-Item $savePath -Force }
-                  # 使用curl下载，超时300秒
                   curl.exe -L -o $savePath $url --connect-timeout 30 --max-time 300
                   
-                  # 校验文件
                   if ($LASTEXITCODE -ne 0 -or (Get-Item $savePath).Length -lt 1KB) {
-                    throw "Download failed (exit code: $LASTEXITCODE, size: $(Get-Item $savePath).Length)"
+                    throw "Download failed or file size too small"
                   }
                   
-                  Write-Host "✅ $VerName part $i downloaded: $([math]::Round((Get-Item $savePath).Length/1MB,2)) MB"
+                  Write-Host "$VerName part $i downloaded successfully: $([math]::Round((Get-Item $savePath).Length/1MB,2)) MB"
                   break
                 }
                 catch {
-                  $retryCount++
-                  Write-Warning "⚠️ Retry $retryCount/3 for $VerName part $i: $_"
-                  if ($retryCount -eq 3) {
+                  $retry++
+                  Write-Warning "Retry $retry/3 for $VerName part $i: $_"
+                  if ($retry -eq 3) {
                     $success = $false
                     break
                   }
                   Start-Sleep -Seconds 5
                 }
-              } while ($retryCount -lt 3)
+              } while ($retry -lt 3)
 
               if (-not $success) { break }
             }
             return $success
           }
 
-          # 函数2：读取WIM信息（核心修复：无变量编码，直接用Default=GBK）
+          # 函数2：读取WIM信息（无编码变量，直接用Default）
           function Get-WimIndexInfo {
             param([string]$WimPath, [int]$TargetIndex)
-            # 临时文件（固定名称，避免GUID混乱）
-            $tempOut = "dism_output.txt"
-            $tempErr = "dism_error.txt"
-            
-            # 清理旧临时文件
+            $tempOut = "dism_out.txt"
+            $tempErr = "dism_err.txt"
+
             if (Test-Path $tempOut) { Remove-Item $tempOut -Force }
             if (Test-Path $tempErr) { Remove-Item $tempErr -Force }
 
             try {
-              # 执行DISM：强制GBK输出，重定向到文件
+              # 执行DISM，强制GBK环境
               cmd /c "chcp 936 && dism.exe /Get-WimInfo /WimFile:`"$WimPath`" /Index:$TargetIndex > $tempOut 2> $tempErr"
-              $exitCode = $LASTEXITCODE
+              if ($LASTEXITCODE -ne 0) {
+                $errMsg = Get-Content $tempErr -Encoding Default -Raw
+                throw "DISM execution failed: $errMsg"
+              }
 
-              # 读取输出：使用Default编码（对应系统GBK），永不Null
-              $dismOut = if (Test-Path $tempOut) { Get-Content $tempOut -Encoding Default -Raw } else { "" }
-              $dismErr = if (Test-Path $tempErr) { Get-Content $tempErr -Encoding Default -Raw } else { "" }
+              # 读取输出，无Null风险
+              $dismOut = Get-Content $tempOut -Encoding Default -Raw
+              if ([string]::IsNullOrWhiteSpace($dismOut)) {
+                throw "DISM output is empty"
+              }
 
-              # 校验执行结果
-              if ($exitCode -ne 0) { throw "DISM failed (code: $exitCode): $dismErr" }
-              if ([string]::IsNullOrWhiteSpace($dismOut)) { throw "DISM output is empty" }
-
-              # 解析索引、名称、描述（精准正则）
-              $indexMatch = [regex]::Matches($dismOut, '(?mi)^Index\s*:\s*(\d+)')
-              $validIndexes = $indexMatch.Groups | Where-Object { $_.Success -and $_.Value -match '\d+' } | ForEach-Object { [int]$_.Groups[1].Value }
-              
+              # 解析字段
               $name = [regex]::Match($dismOut, '(?mi)^Name\s*:\s*(.+)').Groups[1].Value.Trim()
               $desc = [regex]::Match($dismOut, '(?mi)^Description\s*:\s*(.+)').Groups[1].Value.Trim()
+              $indexes = [regex]::Matches($dismOut, '(?mi)^Index\s*:\s*(\d+)').Groups | Where-Object { $_.Success } | ForEach-Object { [int]$_.Groups[1].Value }
 
-              # 返回结果
               return [PSCustomObject]@{
-                ValidIndexes = $validIndexes
-                ImageName    = if ($name) { $name } else { "Unknown Name" }
-                ImageDesc    = if ($desc) { $desc } else { "Unknown Description" }
+                ValidIndexes = $indexes
+                ImageName = $name
+                ImageDesc = $desc
               }
             }
             catch {
-              throw "Failed to read WIM info: $_`nDISM Output: $dismOut`nDISM Error: $dismErr"
+              throw "Failed to read WIM info: $_"
             }
             finally {
-              # 清理临时文件
               Remove-Item $tempOut, $tempErr -Force -ErrorAction SilentlyContinue
             }
           }
 
-          # 主逻辑执行
-          $versions = $env:VERSION_CONFIG | ConvertFrom-Json -ErrorAction Stop
+          # 主逻辑
+          $versions = $env:VERSION_CONFIG | ConvertFrom-Json
           $mainESDAbs = (Resolve-Path $env:MAIN_ESD_NAME).Path
 
           foreach ($ver in $versions) {
@@ -171,59 +149,54 @@ jobs:
             $targetIdx = $ver.ESDIndex
             $partCount = $ver.Parts
 
-            Write-Host "`n=================================================="
-            Write-Host "Processing version: $verName (Target Index: $targetIdx)"
-            Write-Host "=================================================="
+            Write-Host "`n====================================="
+            Write-Host "Processing: $verName (Index: $targetIdx)"
+            Write-Host "====================================="
 
-            # 1. 下载分卷
-            Write-Host "Step 1: Downloading $verName parts ($partCount total)"
+            # 1. 下载
+            Write-Host "1. Downloading $verName parts"
             if (-not (Download-7zParts -VerName $verName -PartCount $partCount)) {
-              Write-Error "❌ Download failed for $verName, skip to next version"
+              Write-Error "Download failed for $verName, skip"
               continue
             }
 
-            # 2. 解压分卷
-            Write-Host "Step 2: Extracting $verName"
+            # 2. 解压
+            Write-Host "2. Extracting $verName"
             $first7z = "$verName.7z.001"
             $extractDir = "$verName"
             7z.exe x "$first7z" -o"$extractDir" -y -bb0 | Out-Null
-            
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path $extractDir)) {
-              Write-Error "❌ Extract failed for $verName, skip"
+              Write-Error "Extract failed for $verName, skip"
               continue
             }
 
-            # 3. 查找WIM文件
-            Write-Host "Step 3: Finding WIM file"
-            $wimFile = Get-ChildItem -Path $extractDir -Filter *.wim -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            # 3. 找WIM
+            Write-Host "3. Finding WIM file"
+            $wimFile = Get-ChildItem -Path $extractDir -Filter *.wim -Recurse | Select-Object -First 1
             if (-not $wimFile) {
-              Write-Error "❌ No WIM file found for $verName, skip"
+              Write-Error "No WIM file found for $verName, skip"
               continue
             }
             $wimPath = $wimFile.FullName
             Write-Host "Found WIM: $wimPath ($([math]::Round($wimFile.Length/1GB,2)) GB)"
 
-            # 4. 读取WIM信息（核心修复）
-            Write-Host "Step 4: Reading WIM info for index $targetIdx"
+            # 4. 读WIM信息
+            Write-Host "4. Reading WIM info for index $targetIdx"
             try {
               $wimInfo = Get-WimIndexInfo -WimPath $wimPath -TargetIndex $targetIdx
-              
-              # 校验目标索引是否存在
               if (-not $wimInfo.ValidIndexes.Contains($targetIdx)) {
-                throw "Target index $targetIdx not in valid indexes: $($wimInfo.ValidIndexes -join ', ')"
+                throw "Index $targetIdx not found in WIM"
               }
-              
-              Write-Host "✅ WIM Index $targetIdx info:"
-              Write-Host "   Name: $($wimInfo.ImageName)"
-              Write-Host "   Description: $($wimInfo.ImageDesc)"
+              Write-Host "Image Name: $($wimInfo.ImageName)"
+              Write-Host "Image Description: $($wimInfo.ImageDesc)"
             }
             catch {
-              Write-Error "❌ Failed to read WIM info: $_"
+              Write-Error "Read WIM info failed: $_"
               continue
             }
 
-            # 5. 转换WIM to ESD（追加模式）
-            Write-Host "Step 5: Converting WIM index $targetIdx to ESD"
+            # 5. 转ESD
+            Write-Host "5. Converting WIM to ESD"
             dism.exe /Export-Image `
               /SourceImageFile:"$wimPath" `
               /SourceIndex:$targetIdx `
@@ -231,23 +204,22 @@ jobs:
               /Compress:recovery `
               /CheckIntegrity `
               /Append | Out-Null
-            
             if ($LASTEXITCODE -eq 0) {
               $esdSize = [math]::Round((Get-Item $mainESDAbs).Length/1GB,2)
-              Write-Host "✅ ESD conversion success! Current ESD size: $esdSize GB"
+              Write-Host "ESD conversion success, size: $esdSize GB"
             }
             else {
-              Write-Error "❌ ESD conversion failed (exit code: $LASTEXITCODE)"
+              Write-Error "ESD conversion failed"
             }
 
-            # 6. 清理临时文件
-            Write-Host "Step 6: Cleaning up $verName temp files"
-            Remove-Item -Path $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path "$verName.7z.*" -Force -ErrorAction SilentlyContinue
-            Write-Host "✅ $verName processing completed"
+            # 6. 清理
+            Write-Host "6. Cleaning up temp files"
+            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item "$verName.7z.*" -Force -ErrorAction SilentlyContinue
           }
 
-      - name: Split ESD to 7z parts
+      # 分卷压缩
+      - name: Split ESD to 7z
         run: |
           $mainESD = $env:MAIN_ESD_NAME
           $splitSize = $env:SPLIT_VOLUME_SIZE
@@ -259,49 +231,43 @@ jobs:
 
           Write-Host "Splitting ESD to 7z parts (size: $splitSize)"
           7z.exe a "$7zPrefix" "$mainESD" -v$splitSize -y -mx=9 -bb0 | Out-Null
-
-          if ($LASTEXITCODE -eq 0) {
-            $splitFiles = Get-ChildItem -Path "$7zPrefix.*"
-            Write-Host "✅ Split success! Generated $($splitFiles.Count) files:"
-            $splitFiles | Select-Object Name, @{Name="Size(MB)"; Expression={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize
-            Remove-Item $mainESD -Force
-          }
-          else {
-            throw "7z split failed (exit code: $LASTEXITCODE)"
+          if ($LASTEXITCODE -ne 0) {
+            throw "7z split failed"
           }
 
+          $splitFiles = Get-ChildItem "$7zPrefix.*"
+          Write-Host "Split success, generated $($splitFiles.Count) files"
+          Remove-Item $mainESD -Force
+
+      # 发布Release（利用预装gh，无安装步骤）
       - name: Publish to GitHub Release
         run: |
           $releaseTag = "Windows_7_ULT&ENT_32&64"
           $7zPrefix = "$($env:MAIN_ESD_NAME).7z"
-          $splitFiles = Get-ChildItem -Path "$7zPrefix.*"
+          $splitFiles = Get-ChildItem "$7zPrefix.*"
 
           if (-not $splitFiles) {
             throw "No split files to upload"
           }
 
-          # 删除旧Release
+          # 简化发布逻辑，无多余认证
           gh release delete $releaseTag -y 2>&1 | Out-Null
-          git tag -d $releaseTag 2>&1 | Out-Null
-          git push origin --delete $releaseTag 2>&1 | Out-Null
-
-          # 创建新Release
           gh release create $releaseTag `
             --title "$releaseTag" `
-            --notes "Windows7 ULT&ENT 32&64 ESD | Split size: $($env:SPLIT_VOLUME_SIZE) | Build time: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+            --notes "Windows7 ESD Build $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 
-          # 上传文件
           foreach ($file in $splitFiles) {
-            Write-Host "Uploading $($file.Name)..."
+            Write-Host "Uploading $($file.Name)"
             gh release upload $releaseTag "$($file.FullName)" --clobber
           }
-          Write-Host "✅ All files uploaded to Release: $releaseTag"
+          Write-Host "All files uploaded to Release: $releaseTag"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # 最终清理
       - name: Final cleanup
         run: |
-          Write-Host "Final cleanup of temp files"
+          Write-Host "Final cleanup"
           Get-ChildItem -Path @("*.7z.*", "*.wim", $env:MAIN_ESD_NAME, "dism_*.txt") -ErrorAction SilentlyContinue | Remove-Item -Force
           Get-ChildItem -Path * -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "Windows7" } | Remove-Item -Recurse -Force
-          Write-Host "✅ Cleanup completed"
+          Write-Host "Cleanup completed"

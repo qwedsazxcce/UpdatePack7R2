@@ -99,11 +99,11 @@ jobs:
           Write-Host "ESD文件创建成功，完整路径：$((Get-Item $mainESD).FullName)"
 
       # ==============================================
-      # 5. 循环处理所有Windows7版本（核心新增解压失败重下逻辑）
+      # 5. 循环处理所有Windows7版本（整合所有修复）
       # ==============================================
       - name: Process all Windows7 versions in order
         run: |
-          # 定义通用下载函数（复用下载逻辑）
+          # 定义通用下载函数（修复curl路径+文件检测+大小验证）
           function Download-7zParts {
             param(
               [string]$VerName,
@@ -116,9 +116,8 @@ jobs:
               $varKey = "install_${VerName}_${partNum}"
               $downloadUrl = [Environment]::GetEnvironmentVariable($varKey)
               $savePath = "$VerName.7z.$partNum"
-              $savePath_External = "`"$savePath`""
-              $retryCount = 3  # 重试次数
-              $retryInterval = 3  # 重试间隔（秒）
+              $retryCount = 3  # 下载重试次数
+              $retryInterval = 3  # 下载重试间隔（秒）
               $downloadOk = $false
               
               # 前置检查URL是否为空
@@ -142,17 +141,26 @@ jobs:
                     Write-Host "      - 重试$retry：删除已有不完整文件 $savePath"
                   }
                   
-                  # 原版curl命令：仅保留-L -o
-                  & curl.exe -L -o $savePath_External $downloadUrl
+                  # 修复1：curl路径写法（直接用"$savePath"，无双层引号）
+                  & curl.exe -L -o "$savePath" $downloadUrl
+                  # 修复2：增加1秒延迟，等待文件系统刷盘
+                  Start-Sleep -Seconds 1
                   
-                  # 检查下载结果
-                  if ($LASTEXITCODE -eq 0 -and (Test-Path $savePath)) {
+                  # 修复3：验证退出码+文件存在+文件大小>0（排除空文件）
+                  if ($LASTEXITCODE -eq 0 -and (Test-Path $savePath) -and ((Get-Item $savePath).Length -gt 0)) {
                     $fileSize = (Get-Item $savePath).Length / 1MB
                     Write-Host "      - 重试$retry：下载成功，文件大小：$($fileSize.ToString("0.00")) MB"
                     $downloadOk = $true
                     break  # 成功则退出重试循环
                   } else {
-                    throw "curl退出码：$LASTEXITCODE，文件未生成"
+                    # 输出详细失败原因，便于排查
+                    $errMsg = "curl退出码：$LASTEXITCODE"
+                    if (-not (Test-Path $savePath)) { 
+                      $errMsg += "，文件不存在" 
+                    } else { 
+                      $errMsg += "，文件大小：$((Get-Item $savePath).Length) 字节" 
+                    }
+                    throw $errMsg
                   }
                 } catch {
                   Write-Warning "      - 重试$retry：下载失败，原因：$_"
@@ -196,13 +204,14 @@ jobs:
             $verName = $ver.Name
             $esdIndex = $ver.ESDIndex
             $partCount = $ver.Parts
+            $unzipRetryCount = 1  # 解压失败后重试下载的次数（改这里调整次数）
             
             Write-Host "`n=================================================="
             Write-Host "开始处理版本：$verName (目标索引：$esdIndex)"
             Write-Host "=================================================="
             
             # ------------------------------
-            # 子步骤1：下载分卷压缩包（调用通用下载函数）
+            # 子步骤1：下载分卷压缩包（调用修复后的下载函数）
             # ------------------------------
             $allPartsDownloaded = Download-7zParts -VerName $verName -PartCount $partCount
             if (-not $allPartsDownloaded) {
@@ -210,14 +219,13 @@ jobs:
             }
 
             # ------------------------------
-            # 子步骤2：解压分卷压缩包（新增失败重下逻辑）
+            # 子步骤2：解压分卷压缩包（失败重下逻辑）
             # ------------------------------
             Write-Host "`n步骤2：解压分卷包..."
             $first7z = "$verName.7z.001"
             $first7z_External = "`"$first7z`""
             $extractDir = "$verName"
             $extractDir_External = "`"$extractDir`""
-            $unzipRetryCount = 3  # 解压失败后重试下载的次数
             $unzipOk = $false
 
             # 解压重试循环（失败则重下）
@@ -260,7 +268,7 @@ jobs:
             }
 
             # ------------------------------
-            # 子步骤3：查找WIM文件 + 读取ANSI编码的映像名（核心修复）
+            # 子步骤3：查找WIM文件 + 读取ANSI编码的映像名
             # ------------------------------
             Write-Host "`n步骤3：查找WIM文件并读取映像名（ANSI编码）..."
             $wimFiles = Get-ChildItem -Path $extractDir -Filter *.wim -Recurse -ErrorAction Stop

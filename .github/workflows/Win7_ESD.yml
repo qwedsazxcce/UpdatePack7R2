@@ -99,7 +99,7 @@ jobs:
           Write-Host "ESD文件创建成功，完整路径：$((Get-Item $mainESD).FullName)"
 
       # ==============================================
-      # 5. 循环处理所有Windows7版本（整合所有修复）
+      # 5. 循环处理所有Windows7版本（修复7z路径解析）
       # ==============================================
       - name: Process all Windows7 versions in order
         run: |
@@ -219,14 +219,20 @@ jobs:
             }
 
             # ------------------------------
-            # 子步骤2：解压分卷压缩包（失败重下逻辑）
+            # 子步骤2：解压分卷压缩包（修复7z路径解析）
             # ------------------------------
             Write-Host "`n步骤2：解压分卷包..."
             $first7z = "$verName.7z.001"
-            $first7z_External = "`"$first7z`""
             $extractDir = "$verName"
-            $extractDir_External = "`"$extractDir`""
+            # 修复1：获取绝对路径（核心）
+            $first7z_AbsPath = (Resolve-Path -Path $first7z -ErrorAction Stop).Path
+            $extractDir_AbsPath = (Resolve-Path -Path . -ErrorAction Stop).Path + "\$extractDir"
             $unzipOk = $false
+
+            # 输出绝对路径调试信息
+            Write-Host "   解压入口文件绝对路径：$first7z_AbsPath"
+            Write-Host "   解压目标目录绝对路径：$extractDir_AbsPath"
+            Write-Host "   验证文件是否存在：$(Test-Path $first7z_AbsPath)"
 
             # 解压重试循环（失败则重下）
             for ($unzipRetry=0; $unzipRetry -le $unzipRetryCount; $unzipRetry++) {
@@ -240,18 +246,22 @@ jobs:
                 if (-not $allPartsDownloaded) {
                   throw "版本$verName 重新下载分卷失败，终止处理"
                 }
+                # 重新获取绝对路径
+                $first7z_AbsPath = (Resolve-Path -Path $first7z -ErrorAction Stop).Path
               }
 
-              # 检查解压入口文件
-              if (-not (Test-Path $first7z)) {
-                Write-Warning "   未找到解压入口文件：$first7z"
+              # 检查解压入口文件（绝对路径）
+              if (-not (Test-Path $first7z_AbsPath)) {
+                Write-Warning "   未找到解压入口文件（绝对路径）：$first7z_AbsPath"
                 continue
               }
 
-              # 执行解压（原版7z命令）
-              & 7z.exe x $first7z_External -o$extractDir_External -y
+              # 修复2：7z命令用绝对路径，-o后面无空格（核心）
+              Write-Host "   执行7z解压命令：7z.exe x `"$first7z_AbsPath`" -o`"$extractDir_AbsPath`" -y"
+              & 7z.exe x "$first7z_AbsPath" -o"$extractDir_AbsPath" -y
+              
               if ($LASTEXITCODE -eq 0) {
-                Write-Host "   解压完成，目标目录：$extractDir"
+                Write-Host "   解压完成，目标目录：$extractDir_AbsPath"
                 $unzipOk = $true
                 break
               } else {
@@ -271,7 +281,7 @@ jobs:
             # 子步骤3：查找WIM文件 + 读取ANSI编码的映像名
             # ------------------------------
             Write-Host "`n步骤3：查找WIM文件并读取映像名（ANSI编码）..."
-            $wimFiles = Get-ChildItem -Path $extractDir -Filter *.wim -Recurse -ErrorAction Stop
+            $wimFiles = Get-ChildItem -Path $extractDir_AbsPath -Filter *.wim -Recurse -ErrorAction Stop
             if ($wimFiles.Count -eq 0) { throw "未找到WIM文件" }
             $wimFile = $wimFiles | Select-Object -First 1
             $wimPath = $wimFile.FullName
@@ -319,7 +329,7 @@ jobs:
             # ------------------------------
             Write-Host "`n步骤5：删除临时文件..."
             if (Test-Path $wimPath) { Remove-Item -Path $wimPath -Force }
-            if (Test-Path $extractDir) { Remove-Item -Path $extractDir -Recurse -Force }
+            if (Test-Path $extractDir_AbsPath) { Remove-Item -Path $extractDir_AbsPath -Recurse -Force }
             Get-ChildItem -Path "$verName.7z.*" -ErrorAction SilentlyContinue | Remove-Item -Force
             Write-Host "临时文件删除完成"
 

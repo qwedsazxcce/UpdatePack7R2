@@ -9,7 +9,7 @@ jobs:
   build-and-upload-esd:
     runs-on: windows-latest
     env:
-      # ========== 下载地址变量（保持原版URL） ==========
+      # ========== 下载地址变量 ==========
       install_Windows7x86ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
       install_Windows7x86ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
       install_Windows7x86ULTIMATE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
@@ -34,7 +34,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ========== 步骤1：循环处理每个版本（核心修复） ==========
+      # ========== 步骤1：循环处理每个版本 ==========
       - name: Process each Windows 7 version
         shell: pwsh
         run: |
@@ -50,7 +50,7 @@ jobs:
             $index = $version.Index
             Write-Host "===== 开始处理版本：$prefix ====="
 
-            # ---------- 子步骤1.1：下载分卷（还原原版curl命令） ----------
+            # ---------- 子步骤1.1：下载分卷（原版curl） ----------
             Write-Host "下载 $prefix 分卷（使用原版curl命令）"
             $volumes = @("001", "002", "003")
             foreach ($vol in $volumes) {
@@ -60,15 +60,12 @@ jobs:
                 Write-Warning "变量 $varName 未定义，跳过该分卷"
                 continue
               }
-              # 修复：分卷文件名还原为7z标准格式（文件名.7z.001）
               $fileName = "$prefix.7z.$vol"
               $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
-              # 还原原版curl命令：仅保留 -L（跟随重定向）、-o（输出文件）
               curl.exe -L -o "$filePath" "$url"
               if ($LASTEXITCODE -ne 0) {
                 throw "下载 $fileName 失败（URL：$url），curl退出码：$LASTEXITCODE"
               }
-              # 校验文件大小（避免空文件）
               $fileSize = (Get-Item "$filePath").Length
               if ($fileSize -eq 0) {
                 throw "$fileName 下载后为空文件（大小0字节），URL可能无效"
@@ -76,7 +73,7 @@ jobs:
               Write-Host "$fileName 下载成功（大小：$([math]::Round($fileSize/1MB,2)) MB）"
             }
 
-            # ---------- 子步骤1.2：创建解压目录（保留权限修复） ----------
+            # ---------- 子步骤1.2：创建解压目录 ----------
             Write-Host "创建解压目录（工作目录内）"
             $extractDir = Join-Path -Path $env:WORK_DIR -ChildPath "extract_$prefix"
             if (Test-Path $extractDir) {
@@ -85,10 +82,9 @@ jobs:
             New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
             Write-Host "解压目录：$extractDir"
 
-            # ---------- 子步骤1.3：解压分卷（使用7z标准命名的001文件） ----------
+            # ---------- 子步骤1.3：解压分卷 ----------
             Write-Host "开始解压 $prefix 分卷"
             $firstVol = Join-Path -Path $env:WORK_DIR -ChildPath "$prefix.7z.001"
-            # 7z解压：使用标准分卷入口文件，保留绝对路径
             7z x -y -bb1 -o"$extractDir" "$firstVol"
             if ($LASTEXITCODE -ge 2) {
               throw "解压 $prefix 失败，7z退出码：$LASTEXITCODE"
@@ -116,7 +112,6 @@ jobs:
 
             # ---------- 子步骤1.6：清理临时文件 ----------
             Write-Host "清理 $prefix 临时文件"
-            # 删除分卷文件
             foreach ($vol in $volumes) {
               $fileName = "$prefix.7z.$vol"
               $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
@@ -124,7 +119,6 @@ jobs:
                 Remove-Item -Path $filePath -Force
               }
             }
-            # 删除解压目录
             if (Test-Path $extractDir) {
               Remove-Item -Path $extractDir -Recurse -Force
             }
@@ -132,14 +126,16 @@ jobs:
             Write-Host "===== 完成处理版本：$prefix ====="
           }
 
-      # ========== 步骤2：分卷压缩ESD ==========
+      # ========== 步骤2：分卷压缩ESD（格式修复+参数修复） ==========
       - name: Split compress ESD file
         shell: pwsh
         run: |
           Write-Host "分卷压缩 ESD 文件"
           $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
           $splitOutput = Join-Path -Path $env:WORK_DIR -ChildPath "$($env:ESD_MAIN_FILE).7z"
-          7z a -y -v$($env:SPLIT_SIZE) "$splitOutput" "$esdPath"
+          # 核心修复：预拼接-v参数，避免$符号解析错误
+          $volParam = "-v$($env:SPLIT_SIZE)"
+          7z a -y $volParam "$splitOutput" "$esdPath"
           if ($LASTEXITCODE -ge 2) {
             throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
           }

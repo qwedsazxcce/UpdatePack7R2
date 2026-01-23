@@ -9,7 +9,7 @@ jobs:
   build-and-upload-esd:
     runs-on: windows-latest
     env:
-      # ========== 下载地址变量（保持不变） ==========
+      # ========== 下载地址变量（可直接修改） ==========
       install_Windows7x86ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
       install_Windows7x86ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
       install_Windows7x86ULTIMATE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
@@ -23,48 +23,34 @@ jobs:
       install_Windows7x64ENTERPRISE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
       install_Windows7x64ENTERPRISE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
       # ========== 通用配置变量 ==========
-      ESD_MAIN_FILE: "Windows_7_ULT&ENT_32&64.esd"
-      SPLIT_SIZE: "1950M"
-      RETRY_COUNT: 10
-      RETRY_INTERVAL: 30
-      RELEASE_NAME: "Windows_7_ULT&ENT_32&64"
+      ESD_MAIN_FILE: "Windows_7_ULT&ENT_32&64.esd"  # 最终ESD文件名
+      SPLIT_SIZE: "1950M"                            # 分卷压缩大小
+      RETRY_COUNT: 10                                # 上传重试次数
+      RETRY_INTERVAL: 30                             # 重试间隔（秒）
+      RELEASE_NAME: "Windows_7_ULT&ENT_32&64"        # 发布名称/标签名
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ========== 步骤1：定义处理版本的列表（修复JSON输出格式） ==========
-      - name: Define version processing list
-        id: define_versions
+      # ========== 步骤1：循环处理每个Windows 7版本（彻底去掉JSON传递，无解析错误） ==========
+      - name: Process each Windows 7 version
         shell: pwsh
         run: |
-          # 定义需要处理的版本：名称前缀、转换索引
+          # 直接在当前步骤定义版本列表（避免跨步骤JSON传递的引号冲突）
           $versions = @(
             @{ Prefix = "install_Windows7x86ULTIMATE"; Index = 5 },
             @{ Prefix = "install_Windows7x86ENTERPRISE"; Index = 1 },
             @{ Prefix = "install_Windows7x64ULTIMATE"; Index = 4 },
             @{ Prefix = "install_Windows7x64ENTERPRISE"; Index = 1 }
           )
-          # 关键修复：用安全方式输出JSON（避免特殊字符解析问题）
-          $versionsJson = $versions | ConvertTo-Json -Compress
-          echo "versions_json<<EOF" >> $env:GITHUB_OUTPUT
-          echo $versionsJson >> $env:GITHUB_OUTPUT
-          echo "EOF" >> $env:GITHUB_OUTPUT
-
-      # ========== 步骤2：循环处理每个版本（修复JSON读取解析错误） ==========
-      - name: Process each Windows 7 version
-        shell: pwsh
-        run: |
-          # 关键修复：先将JSON字符串赋值给变量，再转换（避免直接插值导致的解析错误）
-          $jsonString = "${{ steps.define_versions.outputs.versions_json }}"
-          $versions = $jsonString | ConvertFrom-Json
           
           foreach ($version in $versions) {
             $prefix = $version.Prefix
             $index = $version.Index
             Write-Host "===== 开始处理版本：$prefix (索引：$index) ====="
 
-            # ---------- 子步骤2.1：下载分卷压缩包 ----------
+            # ---------- 子步骤1.1：下载分卷压缩包 ----------
             Write-Host "下载 $prefix 分卷压缩包"
             $volumes = @("001", "002", "003")
             foreach ($vol in $volumes) {
@@ -82,38 +68,42 @@ jobs:
               }
             }
 
-            # ---------- 子步骤2.2：合并并解压7z分卷 ----------
+            # ---------- 子步骤1.2：合并并解压7z分卷 ----------
             Write-Host "解压 $prefix 分卷压缩包"
             7z x -y "$prefix.001" -o"$prefix_temp"
-            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {  # 7z警告码1可忽略
+            # 7z解压警告码1（非致命）忽略，仅错误码非0且非1时抛出异常
+            if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
               throw "解压 $prefix 失败，退出码：$LASTEXITCODE"
             }
 
-            # ---------- 子步骤2.3：获取WIM文件名 ----------
+            # ---------- 子步骤1.3：获取WIM文件名 ----------
             Write-Host "查找 $prefix 的WIM文件"
             $wimFile = Get-ChildItem -Path "$prefix_temp" -Filter "*.wim" -Recurse | Select-Object -First 1
             if (-not $wimFile) {
-              throw "在 $prefix_temp 中未找到WIM文件"
+              throw "在 $prefix_temp 目录中未找到WIM文件"
             }
-            $wimPath = "`"$($wimFile.FullName)`""  # 双引号包裹路径
+            $wimPath = "`"$($wimFile.FullName)`""  # 双引号包裹路径，兼容特殊字符
 
-            # ---------- 子步骤2.4：调用CMD转换WIM到ESD（解决编码问题） ----------
+            # ---------- 子步骤1.4：调用CMD转换WIM到ESD（解决编码问题） ----------
             Write-Host "转换 $prefix WIM到ESD（索引：$index）"
             $esdPath = "`"$($env:ESD_MAIN_FILE)`""
+            # 拼接DISM命令，通过CMD执行避免PowerShell编码冲突
             $dismCmd = "dism /export-image /sourceimagefile=$wimPath /sourceindex=$index /destinationimagefile=$esdPath /compress:recovery /checkintegrity"
             cmd /c $dismCmd
             if ($LASTEXITCODE -ne 0) {
-              throw "DISM转换失败，退出码：$LASTEXITCODE"
+              throw "DISM转换ESD失败，退出码：$LASTEXITCODE"
             }
 
-            # ---------- 子步骤2.5：清理临时文件 ----------
+            # ---------- 子步骤1.5：清理临时文件 ----------
             Write-Host "清理 $prefix 临时文件"
+            # 删除分卷压缩包
             foreach ($vol in $volumes) {
               $fileName = "$prefix.$vol"
               if (Test-Path "$fileName") {
                 Remove-Item -Path "$fileName" -Force
               }
             }
+            # 删除解压目录
             if (Test-Path "$prefix_temp") {
               Remove-Item -Path "$prefix_temp" -Recurse -Force
             }
@@ -121,40 +111,45 @@ jobs:
             Write-Host "===== 完成处理版本：$prefix ====="
           }
 
-      # ========== 步骤3：分卷压缩最终ESD文件 ==========
+      # ========== 步骤2：分卷压缩最终ESD文件 ==========
       - name: Split compress ESD file
         shell: pwsh
         run: |
-          Write-Host "分卷压缩 $($env:ESD_MAIN_FILE)（大小：$($env:SPLIT_SIZE)）"
+          Write-Host "分卷压缩 $($env:ESD_MAIN_FILE)（分卷大小：$($env:SPLIT_SIZE)）"
+          # 双引号包裹文件名，7z分卷压缩（1950M/卷）
           7z a -y -v$($env:SPLIT_SIZE) "`"$($env:ESD_MAIN_FILE).7z`"" "`"$($env:ESD_MAIN_FILE)`""
           if ($LASTEXITCODE -ne 0) {
-            throw "分卷压缩失败，退出码：$LASTEXITCODE"
+            throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
           }
+          # 删除原始ESD文件，仅保留分卷
           Remove-Item -Path "`"$($env:ESD_MAIN_FILE)`"" -Force
 
-      # ========== 步骤4：gh cli上传（删除旧版本+重试逻辑） ==========
+      # ========== 步骤3：GH CLI上传（删除旧版本+10次重试） ==========
       - name: Upload via GitHub CLI with retry
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}  # 工作流默认认证Token
         run: |
           $releaseName = $env:RELEASE_NAME
-          $splitFiles = Get-ChildItem -Path "`"$($env:ESD_MAIN_FILE).7z.*`""
-          $retryCount = $env:RETRY_COUNT -as [int]
-          $retryInterval = $env:RETRY_INTERVAL -as [int]
+          $splitFiles = Get-ChildItem -Path "`"$($env:ESD_MAIN_FILE).7z.*`"" -ErrorAction Stop
+          $retryCount = [int]$env:RETRY_COUNT
+          $retryInterval = [int]$env:RETRY_INTERVAL
 
-          # ---------- 子步骤4.1：删除原有Release和Tag ----------
-          Write-Host "删除原有Release和Tag：$releaseName"
+          # ---------- 子步骤3.1：删除原有Release和Tag ----------
+          Write-Host "删除原有Release/Tag：$releaseName"
+          # 忽略删除不存在的Release/Tag的错误
           gh release delete "$releaseName" -y 2>&1 | Out-Null
           git tag -d "$releaseName" 2>&1 | Out-Null
           git push origin --delete "$releaseName" 2>&1 | Out-Null
 
-          # ---------- 子步骤4.2：上传分卷文件（带重试） ----------
+          # ---------- 子步骤3.2：上传分卷（带重试逻辑） ----------
           $uploadSuccess = $false
           for ($i=1; $i -le $retryCount; $i++) {
             try {
-              Write-Host "第 $i 次尝试上传文件（共 $retryCount 次）"
+              Write-Host "第 $i 次尝试上传（共 $retryCount 次）"
+              # 创建新Release（自动创建同名Tag）
               gh release create "$releaseName" --title "$releaseName" --notes "Auto-built Windows 7 ESD"
+              # 上传所有分卷文件（--clobber覆盖已有文件）
               foreach ($file in $splitFiles) {
                 gh release upload "$releaseName" "`"$($file.FullName)`"" --clobber
               }
@@ -163,7 +158,7 @@ jobs:
               break
             }
             catch {
-              Write-Warning "第 $i 次上传失败：$_"
+              Write-Warning "第 $i 次上传失败：$($_.Exception.Message)"
               if ($i -lt $retryCount) {
                 Write-Host "等待 $retryInterval 秒后重试..."
                 Start-Sleep -Seconds $retryInterval
@@ -175,12 +170,14 @@ jobs:
             throw "重试 $retryCount 次后仍上传失败"
           }
 
-      # ========== 步骤5：最终清理 ==========
+      # ========== 步骤4：最终兜底清理（无论成败都执行） ==========
       - name: Final cleanup
         shell: pwsh
         if: always()
         run: |
           Write-Host "执行最终清理"
-          Get-ChildItem -Path . -Filter "*_temp" -Directory | Remove-Item -Recurse -Force
-          Get-ChildItem -Path . -Filter "install_Windows7*.00*" | Remove-Item -Force
+          # 删除所有临时解压目录
+          Get-ChildItem -Path . -Filter "*_temp" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          # 删除残留的7z分卷源文件
+          Get-ChildItem -Path . -Filter "install_Windows7*.00*" | Remove-Item -Force -ErrorAction SilentlyContinue
           Write-Host "清理完成"

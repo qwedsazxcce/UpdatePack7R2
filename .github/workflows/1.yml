@@ -3,7 +3,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - '.github/workflows/1.yml'  # 仅修改此文件并推送到main分支时触发
+      - '.github/workflows/1.yml'
 
 jobs:
   test-compress-upload:
@@ -18,13 +18,11 @@ jobs:
       DOWNLOAD_URL: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
 
     steps:
-      # 步骤1：检出仓库
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1  # 仅拉取最新代码，加快速度
+          fetch-depth: 1
 
-      # 步骤2：调试 - 输出环境信息（修复7z版本查看命令）
       - name: Debug - Print env info
         shell: pwsh
         run: |
@@ -33,11 +31,9 @@ jobs:
           Write-Host "ESD文件名：$env:ESD_FILE_NAME"
           Write-Host "Release名称：$env:RELEASE_NAME"
           Write-Host "系统路径：$(Get-Location)"
-          # 核心修复：7z无--version参数，用-h（帮助）获取版本信息
           Write-Host "7z版本：$(7z -h | Select-Object -First 1)"
           Write-Host "GH CLI版本：$(gh --version | Select-Object -First 1)"
 
-      # 步骤3：下载文件并命名为目标ESD
       - name: Step 1 - Download & rename file
         shell: pwsh
         run: |
@@ -46,13 +42,11 @@ jobs:
           Write-Host "下载URL：$env:DOWNLOAD_URL"
           Write-Host "保存路径：$targetFilePath"
           
-          # 下载文件
           curl.exe -L -o "$targetFilePath" "$env:DOWNLOAD_URL"
           if ($LASTEXITCODE -ne 0) {
             throw "下载失败，curl退出码：$LASTEXITCODE"
           }
           
-          # 验证文件存在并输出大小
           if (Test-Path $targetFilePath) {
             $fileSize = (Get-Item "$targetFilePath").Length
             Write-Host "✅ 下载成功！文件大小：$([math]::Round($fileSize/1MB,2)) MB"
@@ -60,7 +54,6 @@ jobs:
             throw "❌ 下载后的文件不存在！"
           }
 
-      # 步骤4：分卷压缩ESD文件
       - name: Step 2 - Split compress ESD
         shell: pwsh
         run: |
@@ -68,22 +61,18 @@ jobs:
           $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_FILE_NAME
           $splitOutput = Join-Path -Path $env:WORK_DIR -ChildPath "$($env:ESD_FILE_NAME).7z"
           
-          # 验证源文件存在
           if (-not (Test-Path $esdPath)) {
             throw "❌ 源ESD文件不存在：$esdPath"
           }
           
-          # 拼接7z参数并执行压缩
           $volParam = "-v$($env:SPLIT_SIZE)"
           Write-Host "7z命令：7z a -y $volParam `"$splitOutput`" `"$esdPath`""
           7z a -y $volParam "$splitOutput" "$esdPath"
           
-          # 验证压缩结果
           if ($LASTEXITCODE -ge 2) {
             throw "❌ 7z压缩失败，退出码：$LASTEXITCODE"
           }
           
-          # 列出压缩后的分卷文件
           $splitFiles = Get-ChildItem -LiteralPath $env:WORK_DIR -Filter "$($env:ESD_FILE_NAME).7z.*"
           if ($splitFiles.Count -eq 0) {
             throw "❌ 未生成任何分卷文件！"
@@ -91,7 +80,6 @@ jobs:
           Write-Host "✅ 压缩成功！生成分卷文件："
           $splitFiles | ForEach-Object { Write-Host "  - $($_.FullName)" }
 
-      # 步骤5：上传到GitHub Release
       - name: Step 3 - Upload to Release
         shell: pwsh
         env:
@@ -116,18 +104,18 @@ jobs:
           git push origin --delete "$releaseName" 2>&1 | Out-Null
           Write-Host "已删除旧Tag：$releaseName"
 
-          # 3. 上传重试逻辑
+          # 3. 上传重试逻辑（移除--debug参数）
           $uploadSuccess = $false
           for ($i=1; $i -le $env:RETRY_COUNT; $i++) {
             try {
               Write-Host "=== 第 $i 次上传尝试 ==="
-              # 创建Release（带调试日志）
-              gh release create "$releaseName" --title "$releaseName" --notes "Test: Compress & Upload ESD (Test Run)" --debug
+              # 修复：移除--debug参数（GH CLI release不支持）
+              gh release create "$releaseName" --title "$releaseName" --notes "Test: Compress & Upload ESD (Test Run)"
               
-              # 逐个上传文件
+              # 修复：移除--debug参数，仅保留--clobber
               foreach ($file in $splitFiles) {
                 Write-Host "上传文件：$($file.FullName)"
-                gh release upload "$releaseName" "$($file.FullName)" --clobber --debug
+                gh release upload "$releaseName" "$($file.FullName)" --clobber
                 Write-Host "✅ 单个文件上传成功：$($file.Name)"
               }
               
@@ -144,13 +132,13 @@ jobs:
             }
           }
 
-          # 4. 最终验证
+          # 4. 最终验证（确保无未捕获的错误）
           if (-not $uploadSuccess) {
             throw "❌ 重试 $($env:RETRY_COUNT) 次后仍上传失败！"
           }
           Write-Host "=== 上传流程全部完成 ==="
 
-      # 步骤6：备用 - 上传到Artifact（验证文件生成）
+      # 步骤6：备用 - 上传到Artifact
       - name: Step 4 - Upload to Artifact (Backup)
         uses: actions/upload-artifact@v4
         with:

@@ -45,25 +45,34 @@ jobs:
         uses: actions/checkout@v4
 
       # ==============================================
-      # 2. 初始化PowerShell编码（修复：使用系统默认ANSI编码）
+      # 2. 强制设置PowerShell为ANSI编码（核心修复）
       # ==============================================
-      - name: Set PowerShell ANSI encoding
+      - name: Force set PowerShell to ANSI encoding
         run: |
-          # 使用系统默认ANSI编码（兼容所有Windows语言环境）
-          $ansiEncoding = [System.Text.Encoding]::Default
+          # 步骤1：强制设置控制台代码页为ANSI（简体中文=936，英文=1252，按需修改）
+          chcp 936 | Out-Null
+          # 步骤2：注册并设置ANSI编码（936对应GBK/ANSI）
+          $ansiEncoding = [System.Text.Encoding]::GetEncoding(936)
           [Console]::OutputEncoding = $ansiEncoding
           [Console]::InputEncoding = $ansiEncoding
-          # 可选：输出当前编码确认（便于调试）
-          Write-Host "PowerShell控制台编码已设置为: $($ansiEncoding.EncodingName)"
-          Write-Host "编码代码页: $($ansiEncoding.CodePage)"
+          # 步骤3：验证编码是否生效
+          Write-Host "强制设置ANSI编码完成！"
+          Write-Host "控制台代码页: $([Console]::OutputEncoding.CodePage)"
+          Write-Host "编码名称: $([Console]::OutputEncoding.EncodingName)"
 
       # ==============================================
-      # 3. 安装并认证GitHub CLI
+      # 3. 安装并认证GitHub CLI（修复PowerShell语法）
       # ==============================================
       - name: Setup GitHub CLI
         run: |
+          # 安装gh cli（静默安装）
           winget install --id GitHub.cli --silent --accept-package-agreements --accept-source-agreements
-          gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+          # 等待gh安装完成（避免立即执行找不到命令）
+          Start-Sleep -Seconds 5
+          # PowerShell原生语法：用管道传递token（替代bash的<<<）
+          $env:GH_TOKEN | gh auth login --with-token
+          # 验证gh是否认证成功
+          gh auth status
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

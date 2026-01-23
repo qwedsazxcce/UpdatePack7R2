@@ -3,7 +3,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - '.github/1.yml'  # 仅修改此文件并推送到main分支时触发
+      - '.github/workflows/1.yml'  # 仅修改此文件并推送到main分支时触发
 
 jobs:
   test-compress-upload:

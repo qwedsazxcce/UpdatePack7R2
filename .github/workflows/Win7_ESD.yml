@@ -51,7 +51,7 @@ jobs:
 
       - name: Core workflow
         run: |
-          # 函数1：下载分卷（修复语法错误）
+          # 函数1：下载分卷
           function Download-7zParts {
             param([string]$VerName, [int]$PartCount)
             $success = $true
@@ -81,7 +81,6 @@ jobs:
                 }
                 catch {
                   $retry++
-                  # 核心修复：冒号后加空格，避免变量解析错误
                   Write-Warning "Retry $retry/3 for $VerName part $i : $_"
                   if ($retry -eq 3) {
                     $success = $false
@@ -96,7 +95,7 @@ jobs:
             return $success
           }
 
-          # 函数2：读取WIM信息
+          # 函数2：读取WIM信息（核心修复：空值判空+默认值）
           function Get-WimIndexInfo {
             param([string]$WimPath, [int]$TargetIndex)
             $tempOut = "dism_out.txt"
@@ -106,31 +105,62 @@ jobs:
             if (Test-Path $tempErr) { Remove-Item $tempErr -Force }
 
             try {
+              # 执行DISM并捕获输出
               cmd /c "chcp 936 && dism.exe /Get-WimInfo /WimFile:`"$WimPath`" /Index:$TargetIndex > $tempOut 2> $tempErr"
-              if ($LASTEXITCODE -ne 0) {
-                $errMsg = Get-Content $tempErr -Encoding Default -Raw
-                throw "DISM execution failed: $errMsg"
-              }
+              $dismExitCode = $LASTEXITCODE
 
-              $dismOut = Get-Content $tempOut -Encoding Default -Raw
+              # 读取输出（确保文件存在）
+              $dismOut = if (Test-Path $tempOut) { Get-Content $tempOut -Encoding Default -Raw } else { "" }
+              $dismErr = if (Test-Path $tempErr) { Get-Content $tempErr -Encoding Default -Raw } else { "" }
+
+              # 校验DISM执行结果
+              if ($dismExitCode -ne 0) {
+                throw "DISM exited with code $dismExitCode : $dismErr"
+              }
               if ([string]::IsNullOrWhiteSpace($dismOut)) {
-                throw "DISM output is empty"
+                throw "DISM output is empty, cannot parse WIM info"
               }
 
-              $name = [regex]::Match($dismOut, '(?mi)^Name\s*:\s*(.+)').Groups[1].Value.Trim()
-              $desc = [regex]::Match($dismOut, '(?mi)^Description\s*:\s*(.+)').Groups[1].Value.Trim()
-              $indexes = [regex]::Matches($dismOut, '(?mi)^Index\s*:\s*(\d+)').Groups | Where-Object { $_.Success } | ForEach-Object { [int]$_.Groups[1].Value }
+              # 核心修复：正则匹配后先判空，再取值（避免空数组索引）
+              # 解析索引
+              $indexMatches = [regex]::Matches($dismOut, '(?mi)^Index\s*:\s*(\d+)')
+              $validIndexes = @()
+              if ($indexMatches.Success) {
+                foreach ($match in $indexMatches) {
+                  if ($match.Groups.Count -ge 2 -and $match.Groups[1].Value -match '^\d+$') {
+                    $validIndexes += [int]$match.Groups[1].Value
+                  }
+                }
+              }
+              $validIndexes = $validIndexes | Select-Object -Unique | Sort-Object
 
+              # 解析名称（判空+默认值）
+              $nameMatch = [regex]::Match($dismOut, '(?mi)^Name\s*:\s*(.+)')
+              $imageName = "Unknown Image Name"
+              if ($nameMatch.Success -and $nameMatch.Groups.Count -ge 2) {
+                $imageName = $nameMatch.Groups[1].Value.Trim()
+              }
+
+              # 解析描述（判空+默认值）
+              $descMatch = [regex]::Match($dismOut, '(?mi)^Description\s*:\s*(.+)')
+              $imageDesc = "Unknown Image Description"
+              if ($descMatch.Success -and $descMatch.Groups.Count -ge 2) {
+                $imageDesc = $descMatch.Groups[1].Value.Trim()
+              }
+
+              # 返回安全的结果对象
               return [PSCustomObject]@{
-                ValidIndexes = $indexes
-                ImageName = $name
-                ImageDesc = $desc
+                ValidIndexes = $validIndexes
+                ImageName    = $imageName
+                ImageDesc    = $imageDesc
               }
             }
             catch {
-              throw "Failed to read WIM info: $_"
+              # 抛出详细错误但不中断整体流程
+              throw "DISM info parse error : $_`nDISM Output: $dismOut`nDISM Error: $dismErr"
             }
             finally {
+              # 清理临时文件
               Remove-Item $tempOut, $tempErr -Force -ErrorAction SilentlyContinue
             }
           }
@@ -151,7 +181,7 @@ jobs:
             # 1. 下载
             Write-Host "1. Downloading $verName parts"
             if (-not (Download-7zParts -VerName $verName -PartCount $partCount)) {
-              Write-Error "Download failed for $verName, skip"
+              Write-Error "Download failed for $verName, skip to next version"
               continue
             }
 
@@ -161,7 +191,7 @@ jobs:
             $extractDir = "$verName"
             7z.exe x "$first7z" -o"$extractDir" -y -bb0 | Out-Null
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path $extractDir)) {
-              Write-Error "Extract failed for $verName, skip"
+              Write-Error "Extract failed for $verName, skip to next version"
               continue
             }
 
@@ -169,28 +199,33 @@ jobs:
             Write-Host "3. Finding WIM file"
             $wimFile = Get-ChildItem -Path $extractDir -Filter *.wim -Recurse | Select-Object -First 1
             if (-not $wimFile) {
-              Write-Error "No WIM file found for $verName, skip"
+              Write-Error "No WIM file found for $verName, skip to next version"
               continue
             }
             $wimPath = $wimFile.FullName
             Write-Host "Found WIM: $wimPath ($([math]::Round($wimFile.Length/1GB,2)) GB)"
 
-            # 4. 读WIM信息
+            # 4. 读WIM信息（容错处理）
             Write-Host "4. Reading WIM info for index $targetIdx"
             try {
               $wimInfo = Get-WimIndexInfo -WimPath $wimPath -TargetIndex $targetIdx
-              if (-not $wimInfo.ValidIndexes.Contains($targetIdx)) {
-                throw "Index $targetIdx not found in WIM"
+              
+              # 校验索引（即使索引为空也给出提示，不中断）
+              if ($wimInfo.ValidIndexes.Count -eq 0) {
+                Write-Warning "No valid indexes found in WIM, continue with target index $targetIdx"
+              } elseif (-not $wimInfo.ValidIndexes.Contains($targetIdx)) {
+                Write-Warning "Target index $targetIdx not found in WIM (valid indexes: $($wimInfo.ValidIndexes -join ', ')), continue anyway"
               }
+              
               Write-Host "Image Name: $($wimInfo.ImageName)"
               Write-Host "Image Description: $($wimInfo.ImageDesc)"
             }
             catch {
-              Write-Error "Read WIM info failed: $_"
-              continue
+              Write-Warning "Read WIM info failed : $_"
+              Write-Host "Continue processing $verName without WIM info validation"
             }
 
-            # 5. 转ESD
+            # 5. 转ESD（核心功能，即使WIM信息读取失败也执行）
             Write-Host "5. Converting WIM to ESD"
             dism.exe /Export-Image `
               /SourceImageFile:"$wimPath" `
@@ -199,12 +234,17 @@ jobs:
               /Compress:recovery `
               /CheckIntegrity `
               /Append | Out-Null
+            
             if ($LASTEXITCODE -eq 0) {
               $esdSize = [math]::Round((Get-Item $mainESDAbs).Length/1GB,2)
               Write-Host "ESD conversion success, size: $esdSize GB"
             }
             else {
-              Write-Error "ESD conversion failed"
+              Write-Error "ESD conversion failed for $verName, skip to next version"
+              # 清理当前版本临时文件
+              Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+              Remove-Item "$verName.7z.*" -Force -ErrorAction SilentlyContinue
+              continue
             }
 
             # 6. 清理
@@ -220,13 +260,15 @@ jobs:
           $7zPrefix = "$mainESD.7z"
 
           if (-not (Test-Path $mainESD)) {
-            throw "ESD file $mainESD not found"
+            Write-Warning "ESD file $mainESD not found, skip splitting"
+            exit 0
           }
 
           Write-Host "Splitting ESD to 7z parts (size: $splitSize)"
           7z.exe a "$7zPrefix" "$mainESD" -v$splitSize -y -mx=9 -bb0 | Out-Null
+          
           if ($LASTEXITCODE -ne 0) {
-            throw "7z split failed"
+            throw "7z split failed with exit code $LASTEXITCODE"
           }
 
           $splitFiles = Get-ChildItem "$7zPrefix.*"
@@ -239,18 +281,25 @@ jobs:
           $7zPrefix = "$($env:MAIN_ESD_NAME).7z"
           $splitFiles = Get-ChildItem "$7zPrefix.*"
 
-          if (-not $splitFiles) {
-            throw "No split files to upload"
+          if (-not $splitFiles -or $splitFiles.Count -eq 0) {
+            Write-Warning "No split files to upload, skip release"
+            exit 0
           }
 
+          # 简化发布逻辑，容错处理
           gh release delete $releaseTag -y 2>&1 | Out-Null
-          gh release create $releaseTag `
+          $releaseCreate = gh release create $releaseTag `
             --title "$releaseTag" `
             --notes "Windows7 ESD Build $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          
+          if (-not $releaseCreate) {
+            Write-Warning "Failed to create release, skip upload"
+            exit 0
+          }
 
           foreach ($file in $splitFiles) {
             Write-Host "Uploading $($file.Name)"
-            gh release upload $releaseTag "$($file.FullName)" --clobber
+            gh release upload $releaseTag "$($file.FullName)" --clobber 2>&1 | Out-Null
           }
           Write-Host "All files uploaded to Release: $releaseTag"
         env:

@@ -18,288 +18,222 @@ env:
   # 全局配置
   MAIN_ESD_NAME: Windows_7_ULT&ENT_32&64.esd
   SPLIT_VOLUME_SIZE: 1950M
-  VERSION_CONFIG: |
-    [
-      {"Name":"Windows7x86ULTIMATE","ESDIndex":5,"Parts":3},
-      {"Name":"Windows7x86ENTERPRISE","ESDIndex":1,"Parts":3},
-      {"Name":"Windows7x64ULTIMATE","ESDIndex":4,"Parts":3},
-      {"Name":"Windows7x64ENTERPRISE","ESDIndex":1,"Parts":3}
-    ]
+  RELEASE_TAG: Windows_7_ULT&ENT_32&64
 
 jobs:
   process_and_upload:
     runs-on: windows-latest
     defaults:
       run:
-        shell: pwsh
-    
+        shell: cmd  # 全程使用CMD，而非PowerShell
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Initialize ESD file
+      - name: 初始化ESD文件
         run: |
-          $mainESD = $env:MAIN_ESD_NAME
-          if (Test-Path $mainESD) { Remove-Item $mainESD -Force }
-          New-Item -Path $mainESD -ItemType File -Force | Out-Null
-          Write-Host "ESD file initialized: $mainESD"
+          if exist "%MAIN_ESD_NAME%" del /f /q "%MAIN_ESD_NAME%"
+          type nul > "%MAIN_ESD_NAME%"
+          echo ESD文件初始化完成：%MAIN_ESD_NAME%
 
-      - name: Core workflow (UTF8优先处理)
+      - name: 核心流程（下载→解压→转换，CMD原生处理）
         run: |
-          # 核心函数：读取DISM输出并转换为UTF8（避开ANSI直接处理）
-          function Get-DismUtf8Output {
-            param([string]$DismArgs)
-            # 临时文件（ANSI编码）
-            $ansiFile = [System.IO.Path]::GetTempFileName()
-            $errFile = [System.IO.Path]::GetTempFileName()
-
-            try {
-              # 执行DISM，输出到ANSI临时文件
-              cmd /c "chcp 936 && dism.exe $DismArgs > `"$ansiFile`" 2> `"$errFile`""
-              $exitCode = $LASTEXITCODE
-
-              # 读取ANSI文件并转换为UTF8字符串（关键：仅这一步处理ANSI）
-              $ansiContent = [System.IO.File]::ReadAllText($ansiFile, [System.Text.Encoding]::GetEncoding(936))
-              $utf8Content = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding(936).GetBytes($ansiContent))
-              
-              # 读取错误输出（同样转UTF8）
-              $ansiErr = [System.IO.File]::ReadAllText($errFile, [System.Text.Encoding]::GetEncoding(936))
-              $utf8Err = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::GetEncoding(936).GetBytes($ansiErr))
-
-              return [PSCustomObject]@{
-                ExitCode = $exitCode
-                Output   = $utf8Content
-                Error    = $utf8Err
-              }
-            }
-            catch {
-              throw "DISM执行失败: $_"
-            }
-            finally {
-              # 清理临时文件
-              Remove-Item $ansiFile, $errFile -Force -ErrorAction SilentlyContinue
-            }
-          }
-
-          # 函数1：下载分卷（稳定重试）
-          function Download-7zParts {
-            param([string]$VerName, [int]$PartCount)
-            $success = $true
-            for ($i=1; $i -le $PartCount; $i++) {
-              $partNum = "{0:D3}" -f $i
-              $url = [Environment]::GetEnvironmentVariable("install_${VerName}_${partNum}")
-              $savePath = "$VerName.7z.$partNum"
-              
-              if (-not $url) {
-                Write-Error "URL为空：$VerName part $i"
-                $success = $false
-                continue
-              }
-
-              $retry = 0
-              do {
-                try {
-                  if (Test-Path $savePath) { Remove-Item $savePath -Force }
-                  curl.exe -L -o $savePath $url --connect-timeout 30 --max-time 300
-                  
-                  if ($LASTEXITCODE -ne 0 -or (Get-Item $savePath).Length -lt 1KB) {
-                    throw "下载失败或文件过小"
-                  }
-                  
-                  Write-Host "$VerName part $i 下载成功：$([math]::Round((Get-Item $savePath).Length/1MB,2)) MB"
-                  break
-                }
-                catch {
-                  $retry++
-                  Write-Warning "重试 $retry/3 下载 $VerName part $i : $_"
-                  if ($retry -eq 3) {
-                    $success = $false
-                    break
-                  }
-                  Start-Sleep -Seconds 5
-                }
-              } while ($retry -lt 3)
-
-              if (-not $success) { break }
-            }
-            return $success
-          }
-
-          # 函数2：读取WIM信息（全程UTF8处理）
-          function Get-WimInfoUtf8 {
-            param([string]$WimPath, [int]$TargetIndex)
-            try {
-              # 调用DISM并获取UTF8输出
-              $dismResult = Get-DismUtf8Output -DismArgs "/Get-WimInfo /WimFile:`"$WimPath`" /Index:$TargetIndex"
-              
-              if ($dismResult.ExitCode -ne 0) {
-                throw "DISM退出码：$($dismResult.ExitCode)，错误：$($dismResult.Error)"
-              }
-              if ([string]::IsNullOrWhiteSpace($dismResult.Output)) {
-                throw "DISM输出为空"
-              }
-
-              # 全程UTF8正则匹配（无ANSI坑）
-              # 解析索引
-              $indexMatches = [regex]::Matches($dismResult.Output, '(?mi)^Index\s*:\s*(\d+)')
-              $validIndexes = @()
-              if ($indexMatches.Success) {
-                foreach ($m in $indexMatches) {
-                  if ($m.Groups[1].Value -match '^\d+$') {
-                    $validIndexes += [int]$m.Groups[1].Value
-                  }
-                }
-              }
-
-              # 解析名称和描述（UTF8无乱码）
-              $name = [regex]::Match($dismResult.Output, '(?mi)^Name\s*:\s*(.+)').Groups[1].Value.Trim()
-              $desc = [regex]::Match($dismResult.Output, '(?mi)^Description\s*:\s*(.+)').Groups[1].Value.Trim()
-
-              return [PSCustomObject]@{
-                ValidIndexes = $validIndexes | Select-Object -Unique | Sort-Object
-                ImageName    = if ($name) { $name } else { "未知名称" }
-                ImageDesc    = if ($desc) { $desc } else { "未知描述" }
-              }
-            }
-            catch {
-              throw "读取WIM信息失败：$_"
-            }
-          }
-
-          # 主逻辑（全程UTF8）
-          $versions = $env:VERSION_CONFIG | ConvertFrom-Json
-          $mainESDAbs = (Resolve-Path $env:MAIN_ESD_NAME).Path
-
-          foreach ($ver in $versions) {
-            $verName = $ver.Name
-            $targetIdx = $ver.ESDIndex
-            $partCount = $ver.Parts
-
-            Write-Host "`n====================================="
-            Write-Host "处理：$verName（索引：$targetIdx）"
-            Write-Host "====================================="
-
-            # 1. 下载
-            Write-Host "1. 下载$verName分卷"
-            if (-not (Download-7zParts -VerName $verName -PartCount $partCount)) {
-              Write-Error "$verName下载失败，跳过"
-              continue
-            }
-
-            # 2. 解压
-            Write-Host "2. 解压$verName"
-            $first7z = "$verName.7z.001"
-            $extractDir = "$verName"
-            7z.exe x "$first7z" -o"$extractDir" -y -bb0 | Out-Null
-            
-            if ($LASTEXITCODE -ne 0 -or -not (Test-Path $extractDir)) {
-              Write-Error "$verName解压失败，跳过"
-              continue
-            }
-
-            # 3. 查找WIM
-            Write-Host "3. 查找WIM文件"
-            $wimFile = Get-ChildItem -Path $extractDir -Filter *.wim -Recurse | Select-Object -First 1
-            if (-not $wimFile) {
-              Write-Error "$verName未找到WIM文件，跳过"
-              continue
-            }
-            $wimPath = $wimFile.FullName
-            Write-Host "找到WIM：$wimPath（大小：$([math]::Round($wimFile.Length/1GB,2)) GB）"
-
-            # 4. 读取WIM信息（UTF8无坑）
-            Write-Host "4. 读取索引$targetIdx的WIM信息"
-            try {
-              $wimInfo = Get-WimInfoUtf8 -WimPath $wimPath -TargetIndex $targetIdx
-              Write-Host "映像名称：$($wimInfo.ImageName)"
-              Write-Host "映像描述：$($wimInfo.ImageDesc)"
-              
-              if (-not $wimInfo.ValidIndexes.Contains($targetIdx)) {
-                Write-Warning "目标索引$targetIdx不在有效索引列表中：$($wimInfo.ValidIndexes -join ', ')"
-              }
-            }
-            catch {
-              Write-Warning "读取WIM信息警告：$_，继续执行转换"
-            }
-
-            # 5. WIM转ESD
-            Write-Host "5. 转换WIM到ESD"
-            dism.exe /Export-Image `
-              /SourceImageFile:"$wimPath" `
-              /SourceIndex:$targetIdx `
-              /DestinationImageFile:"$mainESDAbs" `
-              /Compress:recovery `
-              /CheckIntegrity `
-              /Append | Out-Null
-            
-            if ($LASTEXITCODE -eq 0) {
-              $esdSize = [math]::Round((Get-Item $mainESDAbs).Length/1GB,2)
-              Write-Host "ESD转换成功，当前大小：$esdSize GB"
-            }
-            else {
-              Write-Error "$verName ESD转换失败，跳过"
-              Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-              Remove-Item "$verName.7z.*" -Force -ErrorAction SilentlyContinue
-              continue
-            }
-
-            # 6. 清理临时文件
-            Write-Host "6. 清理临时文件"
-            Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
-            Remove-Item "$verName.7z.*" -Force -ErrorAction SilentlyContinue
-          }
-
-      - name: 分卷压缩ESD（UTF8环境）
-        run: |
-          $mainESD = $env:MAIN_ESD_NAME
-          $splitSize = $env:SPLIT_VOLUME_SIZE
-          $7zPrefix = "$mainESD.7z"
-
-          if (-not (Test-Path $mainESD)) {
-            Write-Warning "ESD文件不存在，跳过分卷"
-            exit 0
-          }
-
-          Write-Host "分卷压缩ESD到7z（大小：$splitSize）"
-          7z.exe a "$7zPrefix" "$mainESD" -v$splitSize -y -mx=9 -bb0 | Out-Null
+          @echo off
+          chcp 936 > nul 2>&1  # 强制设置CMD编码为GBK（ANSI）
           
-          if ($LASTEXITCODE -eq 0) {
-            $splitFiles = Get-ChildItem "$7zPrefix.*"
-            Write-Host "分卷成功，生成$($splitFiles.Count)个文件"
-            Remove-Item $mainESD -Force
-          }
-          else {
-            throw "7z分卷失败"
-          }
+          :: 定义版本列表（CMD批量处理）
+          set "VERSIONS=Windows7x86ULTIMATE:5:3 Windows7x86ENTERPRISE:1:3 Windows7x64ULTIMATE:4:3 Windows7x64ENTERPRISE:1:3"
+          
+          :: 遍历所有版本
+          for %%v in (%VERSIONS%) do (
+            :: 拆分版本信息：名称:索引:分卷数
+            for /f "tokens=1,2,3 delims=:" %%a in ("%%v") do (
+              set "VER_NAME=%%a"
+              set "ESD_INDEX=%%b"
+              set "PART_COUNT=%%c"
+            )
+            setlocal enabledelayedexpansion
+            
+            echo.
+            echo =====================================
+            echo 处理：!VER_NAME!（索引：!ESD_INDEX!）
+            echo =====================================
+            
+            :: 1. 下载分卷（带3次重试）
+            echo 1. 下载!VER_NAME!分卷
+            set "DOWNLOAD_SUCCESS=1"
+            for /l %%i in (1,1,!PART_COUNT!) do (
+              :: 补零生成分卷号（001/002/003）
+              set "PART_NUM=00%%i"
+              set "PART_NUM=!PART_NUM:~-3!"
+              
+              :: 获取下载URL
+              set "URL=!install_!VER_NAME!_!PART_NUM!!"
+              call set "URL=%%install_!VER_NAME!_!PART_NUM!%%"
+              set "SAVE_PATH=!VER_NAME!.7z.!PART_NUM!"
+              
+              if "!URL!"=="" (
+                echo 错误：!VER_NAME! 分卷%%i 的URL为空，跳过
+                set "DOWNLOAD_SUCCESS=0"
+                goto :NEXT_VER
+              )
+              
+              :: 下载重试逻辑
+              set "RETRY=0"
+              :DOWNLOAD_RETRY
+              set "RETRY_SUCCESS=0"
+              if exist "!SAVE_PATH!" del /f /q "!SAVE_PATH!"
+              curl.exe -L -o "!SAVE_PATH!" "!URL!" --connect-timeout 30 --max-time 300
+              if !errorlevel! equ 0 (
+                :: 校验文件大小（大于1KB）
+                for %%f in ("!SAVE_PATH!") do if %%~zf gtr 1024 set "RETRY_SUCCESS=1"
+              )
+              
+              if !RETRY_SUCCESS! equ 1 (
+                for %%f in ("!SAVE_PATH!") do echo !VER_NAME! 分卷%%i 下载成功：%%~zf 字节
+                goto :DOWNLOAD_NEXT
+              ) else (
+                set /a RETRY+=3
+                echo 警告：!VER_NAME! 分卷%%i 下载失败，重试!RETRY!/3
+                if !RETRY! lss 3 (
+                  timeout /t 5 /nobreak > nul
+                  goto :DOWNLOAD_RETRY
+                ) else (
+                  echo 错误：!VER_NAME! 分卷%%i 下载重试3次失败，跳过
+                  set "DOWNLOAD_SUCCESS=0"
+                  goto :NEXT_VER
+                )
+              )
+              :DOWNLOAD_NEXT
+            )
+            
+            if !DOWNLOAD_SUCCESS! equ 0 goto :NEXT_VER
+            
+            :: 2. 解压分卷
+            echo 2. 解压!VER_NAME!
+            set "EXTRACT_DIR=!VER_NAME!"
+            if exist "!EXTRACT_DIR!" rmdir /s /q "!EXTRACT_DIR!"
+            md "!EXTRACT_DIR!"
+            7z.exe x "!VER_NAME!.7z.001" -o"!EXTRACT_DIR!" -y -bb0 > nul 2>&1
+            if !errorlevel! neq 0 (
+              echo 错误：!VER_NAME! 解压失败，跳过
+              goto :CLEANUP_VER
+            )
+            
+            :: 3. 查找WIM文件
+            echo 3. 查找WIM文件
+            set "WIM_PATH="
+            for /r "!EXTRACT_DIR!" %%f in (*.wim) do (
+              set "WIM_PATH=%%f"
+              goto :FOUND_WIM
+            )
+            :FOUND_WIM
+            if "!WIM_PATH!"=="" (
+              echo 错误：!VER_NAME! 未找到WIM文件，跳过
+              goto :CLEANUP_VER
+            )
+            for %%f in ("!WIM_PATH!") do echo 找到WIM：%%~ff（大小：%%~zf 字节）
+            
+            :: 4. 读取WIM信息（CMD原生解析ANSI输出，无编码转换）
+            echo 4. 读取索引!ESD_INDEX!的WIM信息
+            dism.exe /Get-WimInfo /WimFile:"!WIM_PATH!" /Index:!ESD_INDEX! > dism_temp.txt 2>&1
+            if !errorlevel! neq 0 (
+              echo 警告：读取WIM信息失败，继续转换流程
+              goto :CONVERT_ESD
+            )
+            
+            :: 解析WIM名称和描述（ANSI直接匹配，无乱码）
+            for /f "tokens=2,* delims=:" %%a in ('findstr /i /c:"Name:" dism_temp.txt') do set "IMAGE_NAME=%%b"
+            for /f "tokens=2,* delims=:" %%a in ('findstr /i /c:"Description:" dism_temp.txt') do set "IMAGE_DESC=%%b"
+            set "IMAGE_NAME=!IMAGE_NAME: =!"
+            set "IMAGE_DESC=!IMAGE_DESC: =!"
+            if "!IMAGE_NAME!"=="" set "IMAGE_NAME=未知名称"
+            if "!IMAGE_DESC!"=="" set "IMAGE_DESC=未知描述"
+            echo 映像名称：!IMAGE_NAME!
+            echo 映像描述：!IMAGE_DESC!
+            del /f /q dism_temp.txt
+            
+            :CONVERT_ESD
+            :: 5. WIM转ESD（追加模式）
+            echo 5. 转换WIM到ESD
+            dism.exe /Export-Image /SourceImageFile:"!WIM_PATH!" /SourceIndex:!ESD_INDEX! /DestinationImageFile:"%MAIN_ESD_NAME%" /Compress:recovery /CheckIntegrity /Append > nul 2>&1
+            if !errorlevel! equ 0 (
+              for %%f in ("%MAIN_ESD_NAME%") do echo ESD转换成功，当前大小：%%~zf 字节
+            ) else (
+              echo 错误：!VER_NAME! ESD转换失败，跳过
+              goto :CLEANUP_VER
+            )
+            
+            :CLEANUP_VER
+            :: 6. 清理临时文件
+            echo 6. 清理临时文件
+            if exist "!EXTRACT_DIR!" rmdir /s /q "!EXTRACT_DIR!"
+            del /f /q "!VER_NAME!.7z.*" > nul 2>&1
+            
+            :NEXT_VER
+            endlocal
+          )
+          echo.
+          echo 所有版本处理完成
+
+      - name: 分卷压缩ESD
+        run: |
+          @echo off
+          chcp 936 > nul 2>&1
+          if not exist "%MAIN_ESD_NAME%" (
+            echo 警告：ESD文件不存在，跳过分卷
+            exit /b 0
+          )
+          echo 分卷压缩ESD到7z（大小：%SPLIT_VOLUME_SIZE%）
+          7z.exe a "%MAIN_ESD_NAME%.7z" "%MAIN_ESD_NAME%" -v%SPLIT_VOLUME_SIZE% -y -mx=9 -bb0 > nul 2>&1
+          if !errorlevel! equ 0 (
+            dir "%MAIN_ESD_NAME%.7z.*" | find /c ".7z." > temp_count.txt
+            set /p FILE_COUNT=<temp_count.txt
+            echo 分卷成功，生成!FILE_COUNT!个文件
+            del /f /q "%MAIN_ESD_NAME%"
+            del /f /q temp_count.txt
+          ) else (
+            echo 错误：7z分卷失败
+            exit /b 1
+          )
 
       - name: 发布到GitHub Release
         run: |
-          $releaseTag = "Windows_7_ULT&ENT_32&64"
-          $7zPrefix = "$($env:MAIN_ESD_NAME).7z"
-          $splitFiles = Get-ChildItem "$7zPrefix.*"
-
-          if (-not $splitFiles -or $splitFiles.Count -eq 0) {
-            Write-Warning "无分卷文件，跳过发布"
-            exit 0
-          }
-
-          # 简化发布（利用预装gh，UTF8环境）
-          gh release delete $releaseTag -y 2>&1 | Out-Null
-          gh release create $releaseTag `
-            --title "$releaseTag" `
-            --notes "Windows7 ESD构建时间：$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-
-          foreach ($file in $splitFiles) {
-            Write-Host "上传文件：$($file.Name)"
-            gh release upload $releaseTag "$($file.FullName)" --clobber 2>&1 | Out-Null
-          }
-          Write-Host "所有文件上传完成：$releaseTag"
+          @echo off
+          chcp 936 > nul 2>&1
+          set "7Z_PREFIX=%MAIN_ESD_NAME%.7z"
+          
+          :: 检查分卷文件
+          dir "!7Z_PREFIX!.*" > nul 2>&1
+          if !errorlevel! neq 0 (
+            echo 警告：无分卷文件，跳过发布
+            exit /b 0
+          )
+          
+          :: 删除旧Release
+          gh release delete "%RELEASE_TAG%" -y > nul 2>&1
+          
+          :: 创建新Release
+          for /f "tokens=*" %%a in ('powershell -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'"') do set "BUILD_TIME=%%a"
+          gh release create "%RELEASE_TAG%" --title "%RELEASE_TAG%" --notes "Windows7 ESD构建时间：!BUILD_TIME!"
+          
+          :: 上传所有分卷文件
+          for %%f in ("!7Z_PREFIX!.*") do (
+            echo 上传文件：%%~nxf
+            gh release upload "%RELEASE_TAG%" "%%~ff" --clobber > nul 2>&1
+          )
+          echo 所有文件上传完成：%RELEASE_TAG%
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 最终清理
         run: |
-          Write-Host "最终清理临时文件"
-          Get-ChildItem -Path @("*.7z.*", "*.wim", $env:MAIN_ESD_NAME) -ErrorAction SilentlyContinue | Remove-Item -Force
-          Get-ChildItem -Path * -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "Windows7" } | Remove-Item -Recurse -Force
-          Write-Host "清理完成"
+          @echo off
+          chcp 936 > nul 2>&1
+          echo 最终清理临时文件
+          del /f /q *.7z.* > nul 2>&1
+          del /f /q *.wim > nul 2>&1
+          del /f /q "%MAIN_ESD_NAME%" > nul 2>&1
+          for /d %%d in (Windows7*) do rmdir /s /q "%%d"
+          echo 清理完成

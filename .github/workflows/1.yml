@@ -1,62 +1,136 @@
-# 工作流名称（可自定义）
-name: Build and Upload Windows7 Release
-
-# 触发规则：支持手动触发 + 可选的代码推送触发（按需启用）
+name: Test-Compress-Upload-ESD
 on:
-  # 手动触发（推荐，方便测试和控制执行时机）
-  workflow_dispatch:
-  # 可选：当推送到main分支时自动触发（取消注释即可启用）
-  # push:
-  #   branches: [ main ]
-  #   paths:
-  #     - 'workdir/**'  # 仅当workdir目录文件变动时触发
-
-# 定义作业
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/1.yml'
+      
 jobs:
-  upload-windows7-release:
-    # 运行环境（推荐使用Ubuntu最新版，兼容性最好）
-    runs-on: ubuntu-latest
-    # 设置权限（确保能操作Release/Tag）
-    permissions:
-      contents: write  # 必须授予写入内容的权限，否则无法创建/删除Release/Tag
+  test-compress-upload:
+    runs-on: windows-latest
+    env:
+      # ========== 核心配置（和之前保持一致） ==========
+      WORK_DIR: ${{ github.workspace }}
+      ESD_FILE_NAME: Windows_7_ULT&ENT_32&64.esd  # 目标文件名
+      SPLIT_SIZE: 1950M                           # 分卷大小
+      RETRY_COUNT: 10                             # 上传重试次数
+      RETRY_INTERVAL: 30                          # 重试间隔（秒）
+      RELEASE_NAME: Windows_7_ULT&ENT_32&64       # Release名称
+      # 待下载的文件URL
+      DOWNLOAD_URL: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
 
     steps:
-      # 步骤1：检出仓库代码（必须，否则无法访问workdir目录的文件）
+      # 步骤1：检出仓库（保持和之前一致的基础步骤）
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤2：删除已存在的Release和Tag（处理特殊字符&，确保幂等性）
-      - name: Delete existing release and tag
+      # 步骤2：下载文件并直接命名为目标ESD文件（核心测试步骤）
+      - name: Download file and rename to ESD
         shell: pwsh
         run: |
-          $targetName = "Windows7_ULT&ENT_32&64"
+          Write-Host "开始下载文件：$env:DOWNLOAD_URL"
+          # 拼接目标文件路径（工作目录+指定ESD文件名）
+          $targetFilePath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_FILE_NAME
+          # 用原版curl下载，直接命名为目标ESD文件
+          curl.exe -L -o "$targetFilePath" "$env:DOWNLOAD_URL"
           
-          # 检查并删除Release
-          try {
-              $releaseId = gh release view "$targetName" --json id --jq ".id" 2>&1
-              if ($LASTEXITCODE -eq 0) {
-                  Write-Host "Found existing release: $targetName, deleting..."
-                  gh release delete "$targetName" --cleanup-tag --yes
-              } else {
-                  Write-Host "No existing release found for: $targetName"
-              }
+          # 校验下载结果
+          if ($LASTEXITCODE -ne 0) {
+            throw "文件下载失败，curl退出码：$LASTEXITCODE"
           }
-          catch {
-              Write-Host "No existing release found for: $targetName (error: $_)"
+          $fileSize = (Get-Item "$targetFilePath").Length
+          if ($fileSize -eq 0) {
+            throw "下载的文件为空（大小0字节）"
+          }
+          Write-Host "✅ 文件下载成功并命名为：$env:ESD_FILE_NAME"
+          Write-Host "文件大小：$([math]::Round($fileSize/1MB,2)) MB"
+
+      # 步骤3：分卷压缩（完全复用之前修复的代码）
+      - name: Split compress ESD file
+        shell: pwsh
+        run: |
+          Write-Host "开始分卷压缩 ESD 文件"
+          # 源ESD文件路径
+          $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_FILE_NAME
+          # 分卷压缩输出路径（后缀为.7z）
+          $splitOutput = Join-Path -Path $env:WORK_DIR -ChildPath "$($env:ESD_FILE_NAME).7z"
+          
+          # 核心修复：预拼接-v参数，避免$符号解析错误
+          $volParam = "-v$($env:SPLIT_SIZE)"
+          # 执行7z分卷压缩
+          7z a -y $volParam "$splitOutput" "$esdPath"
+          
+          # 校验压缩结果
+          if ($LASTEXITCODE -ge 2) {
+            throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
+          }
+          Write-Host "✅ ESD文件分卷压缩完成"
+
+      # 步骤4：上传到GitHub Release（完全复用之前修复的代码）
+      - name: Upload to GitHub Release
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $releaseName = $env:RELEASE_NAME
+          # 用LiteralPath处理含&的路径，避免解析错误
+          $splitFiles = Get-ChildItem -LiteralPath "$env:WORK_DIR" -Filter "$($env:ESD_FILE_NAME).7z.*" -ErrorAction Stop
+          $retryCount = [int]$env:RETRY_COUNT
+          $retryInterval = [int]$env:RETRY_INTERVAL
+
+          # 删除原有Release/Tag（测试用，可保留）
+          Write-Host "删除原有Release/Tag：$releaseName"
+          gh release delete "$releaseName" -y 2>&1 | Out-Null
+          git tag -d "$releaseName" 2>&1 | Out-Null
+          git push origin --delete "$releaseName" 2>&1 | Out-Null
+
+          # 前置检查：确保分卷文件存在
+          if ($splitFiles.Count -eq 0) {
+            throw "未找到分卷压缩文件！路径：$env:WORK_DIR\$($env:ESD_FILE_NAME).7z.*"
+          }
+          Write-Host "待上传分卷文件数：$($splitFiles.Count)"
+
+          # 上传重试逻辑
+          $uploadSuccess = $false
+          for ($i=1; $i -le $retryCount; $i++) {
+            try {
+              Write-Host "第 $i 次上传（共 $retryCount 次）"
+              # 创建Release
+              gh release create "$releaseName" --title "$releaseName" --notes "Test: Compress & Upload ESD"
+              # 上传所有分卷（移除重复引号，处理特殊字符）
+              foreach ($file in $splitFiles) {
+                Write-Host "上传文件：$($file.FullName)"
+                gh release upload "$releaseName" "$($file.FullName)" --clobber
+              }
+              $uploadSuccess = $true
+              Write-Host "✅ 所有文件上传成功"
+              break
+            }
+            catch {
+              Write-Warning "第 $i 次上传失败：$($_.Exception.Message)"
+              if ($i -lt $retryCount) {
+                Write-Host "等待 $retryInterval 秒后重试..."
+                Start-Sleep -Seconds $retryInterval
+              }
+            }
           }
 
-          # 兜底检查并删除Tag（防止--cleanup-tag未生效）
-          try {
-              git ls-remote --tags origin "refs/tags/$targetName" 2>&1 | Out-Null
-              if ($LASTEXITCODE -eq 0) {
-                  Write-Host "Found existing tag: $targetName, deleting..."
-                  git push origin --delete "refs/tags/$targetName"
-              } else {
-                  Write-Host "No existing tag found for: $targetName"
-              }
+          # 最终校验
+          if (-not $uploadSuccess) {
+            throw "重试 $retryCount 次后仍上传失败"
           }
-          catch {
-              Write-Host "No existing tag found for: $targetName (error: $_)"
+
+      # 步骤5：最终清理（可选，测试完成后清理临时文件）
+      - name: Final cleanup
+        shell: pwsh
+        if: always()
+        run: |
+          Write-Host "执行清理操作"
+          # 删除原始ESD文件
+          $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_FILE_NAME
+          if (Test-Path $esdPath) {
+            Remove-Item -Path $esdPath -Force
           }
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 删除分卷压缩文件
+          Get-ChildItem -Path $env:WORK_DIR -Filter "$($env:ESD_FILE_NAME).7z.*" | Remove-Item -Force -ErrorAction SilentlyContinue
+          Write-Host "✅ 清理完成"

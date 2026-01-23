@@ -45,22 +45,28 @@ jobs:
         uses: actions/checkout@v4
 
       # ==============================================
-      # 2. 编码配置（鲁棒性修复）
+      # 2. 编码配置（核心修复：强制GBK编码解决中文乱码）
       # ==============================================
       - name: Critical encoding setup
         run: |
+          # 加载GBK编码提供器
           try {
             $assembly = [System.Reflection.Assembly]::LoadWithPartialName("System.Text.Encoding.CodePages")
             $encodingProvider = [System.Text.CodePagesEncodingProvider]::Instance
             [System.Text.Encoding]::RegisterProvider($encodingProvider)
-            $global:WORK_ENCODING = [System.Text.Encoding]::GetEncoding(936)
-            Write-Host "编码配置成功：GBK(936)"
+            # 强制设置PowerShell输出/输入为GBK（匹配DISM编码）
+            $global:GBK_ENCODING = [System.Text.Encoding]::GetEncoding(936)
+            [Console]::OutputEncoding = $global:GBK_ENCODING
+            [Console]::InputEncoding = $global:GBK_ENCODING
+            $OutputEncoding = $global:GBK_ENCODING
+            Write-Host "编码配置成功：GBK(936)，解决DISM中文乱码问题"
           } catch {
             Write-Warning "GBK编码加载失败，降级为UTF8：$_"
-            $global:WORK_ENCODING = [System.Text.Encoding]::UTF8
+            $global:GBK_ENCODING = [System.Text.Encoding]::UTF8
+            [Console]::OutputEncoding = $global:GBK_ENCODING
+            [Console]::InputEncoding = $global:GBK_ENCODING
+            $OutputEncoding = $global:GBK_ENCODING
           }
-          [Console]::OutputEncoding = $global:WORK_ENCODING
-          [Console]::InputEncoding = $global:WORK_ENCODING
 
       # ==============================================
       # 3. 安装依赖
@@ -99,7 +105,7 @@ jobs:
           Write-Host "初始化ESD文件成功：$((Get-Item $mainESD).FullName)"
 
       # ==============================================
-      # 5. 核心处理逻辑（全流程修复+逻辑校验）
+      # 5. 核心处理逻辑（修复编码+匹配正确字段）
       # ==============================================
       - name: Process all Windows7 versions (full workflow)
         run: |
@@ -181,14 +187,19 @@ jobs:
             return $allPartsDownloaded
           }
 
-          # 验证WIM索引函数
+          # 验证WIM索引函数（修复编码读取）
           function Get-WimValidIndexes {
             param(
               [string]$WimPath
             )
             try {
-              $dismOutput = & dism /Get-WimInfo /WimFile:$WimPath 2>&1
-              $dismStr = $dismOutput | Out-String
+              # 执行DISM并强制用GBK读取输出，解决中文乱码
+              $dismProcess = Start-Process -FilePath "dism.exe" -ArgumentList "/Get-WimInfo /WimFile:$WimPath" -NoNewWindow -PassThru -RedirectStandardOutput "dism_output.txt" -RedirectStandardError "dism_error.txt"
+              $dismProcess.WaitForExit()
+              
+              # 用GBK编码读取输出文件
+              $dismStr = Get-Content -Path "dism_output.txt" -Encoding $global:GBK_ENCODING -Raw
+              Remove-Item -Path "dism_output.txt", "dism_error.txt" -Force -ErrorAction SilentlyContinue
               
               $indexMatches = [regex]::Matches($dismStr, '(?mi)^Index\s*:\s*(\d+)')
               $validIndexes = @()
@@ -204,6 +215,35 @@ jobs:
               return $validIndexes
             } catch {
               throw "读取WIM索引失败：$_`nDISM输出：$dismStr"
+            }
+          }
+
+          # 读取WIM索引名称函数（核心修复：匹配Name字段）
+          function Get-WimIndexName {
+            param(
+              [string]$WimPath,
+              [int]$Index
+            )
+            try {
+              # 执行DISM并强制GBK编码读取
+              $dismProcess = Start-Process -FilePath "dism.exe" -ArgumentList "/Get-WimInfo /WimFile:$WimPath /Index:$Index" -NoNewWindow -PassThru -RedirectStandardOutput "dism_index_output.txt" -RedirectStandardError "dism_index_error.txt"
+              $dismProcess.WaitForExit()
+              
+              # 用GBK编码读取输出，解决中文乱码
+              $dismIndexStr = Get-Content -Path "dism_index_output.txt" -Encoding $global:GBK_ENCODING -Raw
+              Remove-Item -Path "dism_index_output.txt", "dism_index_error.txt" -Force -ErrorAction SilentlyContinue
+              
+              # 修复正则：匹配"Name : "字段（而非Image Name），兼容空格/大小写
+              $imageNameMatch = [regex]::Match($dismIndexStr, '(?mi)^Name\s*:\s*(.+)')
+              if ($imageNameMatch.Success) {
+                $imageName = $imageNameMatch.Groups[1].Value.Trim()
+                Write-Host "   索引$Index映像名：$imageName"
+                return $imageName
+              } else {
+                throw "未匹配到Name字段，DISM输出关键内容：`n$($dismIndexStr -replace '[\r\n]+', ' ')"
+              }
+            } catch {
+              throw "读取索引$Index名称失败：$_"
             }
           }
 
@@ -294,18 +334,11 @@ jobs:
             }
             Write-Host "   指定索引$targetIndex存在，开始读取映像名..."
             
+            # 调用修复后的函数读取映像名
             try {
-              $dismIndexOutput = & dism /Get-WimInfo /WimFile:$wimPath /Index:$targetIndex 2>&1
-              $dismIndexStr = $dismIndexOutput | Out-String
-              $imageNameMatch = [regex]::Match($dismIndexStr, '(?mi)^Image Name\s*:\s*(.+)')
-              if ($imageNameMatch.Success) {
-                $imageName = $imageNameMatch.Groups[1].Value.Trim()
-                Write-Host "   索引$targetIndex映像名：$imageName"
-              } else {
-                throw "未匹配到Image Name字段"
-              }
+              $imageName = Get-WimIndexName -WimPath $wimPath -Index $targetIndex
             } catch {
-              Write-Error "读取映像名失败：$_`nDISM输出：$dismIndexStr"
+              Write-Error "读取映像名失败：$_"
               continue
             }
 

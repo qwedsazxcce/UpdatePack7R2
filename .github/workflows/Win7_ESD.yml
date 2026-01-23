@@ -1,11 +1,10 @@
 name: Windows_7_ULT&ENT_32&64
 
-# 触发方式：手动触发（可根据需要添加push/tag等触发条件）
 on:
   workflow_dispatch:
 
 env:
-  # 定义所有下载地址变量（保持你提供的地址不变）
+  # 固定下载地址变量
   install_Windows7x86ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
   install_Windows7x86ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
   install_Windows7x86ULTIMATE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
@@ -18,9 +17,11 @@ env:
   install_Windows7x64ENTERPRISE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001
   install_Windows7x64ENTERPRISE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
   install_Windows7x64ENTERPRISE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
-  # 分卷大小：1950M 转换为字节（1950*1024*1024=2044692480）
-  SPLIT_SIZE: 2044692480
-  # 版本配置（循环用，避免重复代码）
+  # 统一ESD文件名（固定为工作流名称）
+  MAIN_ESD_NAME: "Windows_7_ULT&ENT_32&64.esd"
+  # 7z分卷大小（直接指定1950M，无需转换字节）
+  SPLIT_VOLUME_SIZE: "1950M"
+  # 版本处理配置（按指定顺序）
   VERSION_CONFIG: |
     [
       {"Name":"Windows7x86ULTIMATE","ESDIndex":5,"Parts":3},
@@ -34,55 +35,72 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: pwsh
-        encoding: OEM  # 对应Windows ANSI编码
-
+        shell: pwsh  # 仅保留有效的shell配置，移除错误的encoding参数
+    
     steps:
       # ==============================================
-      # 1. 检出代码（可选，若需操作仓库文件则保留）
+      # 1. 检出代码
       # ==============================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ==============================================
-      # 2. 安装并认证GitHub CLI（gh）
+      # 2. 初始化PowerShell编码（关键补充：设置ANSI/OEM编码）
+      # ==============================================
+      - name: Set PowerShell ANSI encoding
+        run: |
+          # 设置控制台输入/输出编码为OEM（对应Windows ANSI）
+          [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding("oem")
+          [Console]::InputEncoding = [System.Text.Encoding]::GetEncoding("oem")
+          Write-Host "PowerShell编码已设置为ANSI/OEM"
+
+      # ==============================================
+      # 3. 安装并认证GitHub CLI
       # ==============================================
       - name: Setup GitHub CLI
         run: |
-          # 安装gh cli（windows-latest默认无，用winget安装系统自带包）
           winget install --id GitHub.cli --silent --accept-package-agreements --accept-source-agreements
-          # 认证gh cli（使用Actions内置Token）
           gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ==============================================
-      # 3. 循环处理所有Windows7版本（核心流程）
+      # 4. 初始化统一ESD文件
       # ==============================================
-      - name: Process all Windows7 versions
+      - name: Initialize main ESD file
         run: |
-          # 解析版本配置
+          $mainESD = "`"$env:MAIN_ESD_NAME`""
+          Write-Host "初始化统一ESD文件: $mainESD"
+          if (Test-Path $mainESD) { Remove-Item -Path $mainESD -Force }
+          New-Item -Path $mainESD -ItemType File -Force | Out-Null
+          Write-Host "初始化完成"
+
+      # ==============================================
+      # 5. 循环处理所有Windows7版本（核心流程）
+      # ==============================================
+      - name: Process all Windows7 versions in order
+        run: |
           $versions = $env:VERSION_CONFIG | ConvertFrom-Json
+          $mainESD = "`"$env:MAIN_ESD_NAME`""
           
           foreach ($ver in $versions) {
             $verName = $ver.Name
             $esdIndex = $ver.ESDIndex
             $partCount = $ver.Parts
             
-            Write-Host "`n========== 开始处理 $verName (ESD索引: $esdIndex) =========="
+            Write-Host "`n========== 开始处理 $verName (索引: $esdIndex) =========="
             
             # ------------------------------
             # 子步骤1：下载分卷压缩包
             # ------------------------------
-            Write-Host "`n[Step 1] 下载 $verName 分卷包..."
+            Write-Host "`n[Step 1] 下载分卷包..."
             for ($i=1; $i -le $partCount; $i++) {
-              $partNum = "{0:D3}" -f $i  # 格式化为001/002/003
+              $partNum = "{0:D3}" -f $i
               $varKey = "install_${verName}_${partNum}"
               $downloadUrl = [Environment]::GetEnvironmentVariable($varKey)
-              $savePath = "`"$verName.7z.$partNum`""  # 文件名加双引号
+              $savePath = "`"$verName.7z.$partNum`""
               
               if ($downloadUrl) {
-                Write-Host "下载分卷 $i: $downloadUrl -> $savePath"
                 & curl.exe -L -o $savePath $downloadUrl
                 if ($LASTEXITCODE -ne 0) { throw "分卷 $i 下载失败" }
               } else {
@@ -93,104 +111,99 @@ jobs:
             # ------------------------------
             # 子步骤2：解压分卷压缩包
             # ------------------------------
-            Write-Host "`n[Step 2] 解压 $verName 分卷包..."
+            Write-Host "`n[Step 2] 解压分卷包..."
             $first7z = "`"$verName.7z.001`""
             if (Test-Path $first7z) {
-              & 7z.exe x $first7z -o"`"$verName`"" -y  # 系统自带7z解压
+              & 7z.exe x $first7z -o"`"$verName`"" -y
               if ($LASTEXITCODE -ne 0) { throw "解压失败" }
             } else {
-              throw "未找到解压入口文件: $first7z"
+              throw "未找到解压入口: $first7z"
             }
 
             # ------------------------------
             # 子步骤3：查找WIM文件
             # ------------------------------
-            Write-Host "`n[Step 3] 查找 $verName WIM文件..."
-            $wimFile = Get-ChildItem -Path "`"$verName`"" -Filter *.wim -Recurse -ErrorAction Stop | Select-Object -First 1
-            if (-not $wimFile) { throw "未找到WIM文件" }
+            Write-Host "`n[Step 3] 查找WIM文件..."
+            $wimFiles = Get-ChildItem -Path "`"$verName`"" -Filter *.wim -Recurse -ErrorAction Stop
+            if ($wimFiles.Count -eq 0) { throw "未找到WIM文件" }
+            $wimFile = $wimFiles | Select-Object -First 1
             $wimPath = "`"$($wimFile.FullName)`""
-            Write-Host "找到WIM文件: $wimPath"
+            Write-Host "找到WIM: $wimPath"
 
             # ------------------------------
-            # 子步骤4：WIM转换为指定索引的ESD
+            # 子步骤4：WIM索引追加到统一ESD
             # ------------------------------
-            Write-Host "`n[Step 4] 转换WIM为ESD（索引: $esdIndex）..."
-            $esdPath = "`"$verName.esd`""
-            & dism /Export-Image /SourceImageFile:$wimPath /SourceIndex:$esdIndex /DestinationImageFile:$esdPath /Compress:recovery /CheckIntegrity
-            if ($LASTEXITCODE -ne 0) { throw "WIM转ESD失败" }
+            Write-Host "`n[Step 4] 转换并追加到ESD..."
+            & dism /Export-Image `
+              /SourceImageFile:$wimPath `
+              /SourceIndex:$esdIndex `
+              /DestinationImageFile:$mainESD `
+              /Compress:recovery `
+              /CheckIntegrity `
+              /Append
+            if ($LASTEXITCODE -ne 0) { throw "转换追加失败" }
 
             # ------------------------------
-            # 子步骤5：删除临时文件（WIM/分卷包/解压目录）
+            # 子步骤5：删除当前版本临时文件
             # ------------------------------
-            Write-Host "`n[Step 5] 删除 $verName 临时文件..."
-            # 删除WIM文件
+            Write-Host "`n[Step 5] 删除临时文件..."
             if (Test-Path $wimPath) { Remove-Item -Path $wimPath -Force }
-            # 删除解压目录
             if (Test-Path "`"$verName`"") { Remove-Item -Path "`"$verName`"" -Recurse -Force }
-            # 删除分卷压缩包
             Get-ChildItem -Path "`"$verName.7z.*`"" -ErrorAction SilentlyContinue | Remove-Item -Force
-
-            # ------------------------------
-            # 子步骤6：ESD文件分卷压缩（1950M/卷）
-            # ------------------------------
-            Write-Host "`n[Step 6] 分卷压缩ESD文件（1950M/卷）..."
-            $esdRawPath = $esdPath -replace '"', ''  # 去掉双引号便于流操作
-            $splitPrefix = "`"$verName.esd.part`""
-            $chunkSize = [int64]$env:SPLIT_SIZE
-
-            # 用.NET FileStream实现分卷（系统自带，无需额外工具）
-            $inStream = [System.IO.File]::OpenRead($esdRawPath)
-            $buffer = New-Object byte[] $chunkSize
-            $partNum = 1
-
-            while ($bytesRead = $inStream.Read($buffer, 0, $buffer.Length)) {
-              $partFile = "$splitPrefix$partNum"
-              $outStream = [System.IO.File]::OpenWrite($partFile)
-              $outStream.Write($buffer, 0, $bytesRead)
-              $outStream.Close()
-              $partNum++
-            }
-            $inStream.Close()
-
-            # 删除原始ESD文件
-            if (Test-Path $esdPath) { Remove-Item -Path $esdPath -Force }
+            Write-Host "临时文件已删除"
 
             Write-Host "========== $verName 处理完成 ==========`n"
           }
 
       # ==============================================
-      # 4. 删除原有Release和Tag（带重试）
+      # 6. 用7z分卷压缩统一ESD
       # ==============================================
-      - name: Delete existing Release/Tag
+      - name: Split main ESD with 7z (1950M/卷，同名分卷)
         run: |
-          $releaseName = "Windows_7_ULT&ENT_32&64"
-          $tagName = "Win7-ULT-ENT-32-64"
+          $mainESD = "`"$env:MAIN_ESD_NAME`""
+          $splitSize = $env:SPLIT_VOLUME_SIZE
+          $7zArchivePrefix = "`"$($env:MAIN_ESD_NAME).7z`""
+          
+          Write-Host "`n[7z Split] 分卷压缩 $mainESD 至 $7zArchivePrefix，每卷 $splitSize..."
+          if (-not (Test-Path $mainESD)) { throw "主ESD文件不存在" }
+          if ((Get-Item $mainESD).Length -eq 0) { throw "主ESD文件为空" }
+
+          & 7z.exe a $7zArchivePrefix $mainESD -v$splitSize -y -mx=9
+          if ($LASTEXITCODE -ne 0) { throw "7z分卷压缩失败" }
+
+          Remove-Item -Path $mainESD -Force
+          Write-Host "7z分卷完成，生成文件: $(Get-ChildItem -Path "`"$($env:MAIN_ESD_NAME).7z.*`"" | Select-Object -ExpandProperty Name)"
+
+      # ==============================================
+      # 7. 删除原有Release和Tag（带重试）
+      # ==============================================
+      - name: Delete existing Release and Tag
+        run: |
+          $releaseTag = "Windows_7_ULT&ENT_32&64"
           $retryTimes = 10
           $retryInterval = 30
 
-          # 删除Release（重试10次，间隔30秒）
-          Write-Host "`n[Delete Release] 尝试删除原有Release: $releaseName"
+          Write-Host "`n删除原有Release: $releaseTag"
           for ($i=1; $i -le $retryTimes; $i++) {
             try {
-              gh release delete $releaseName -y
+              gh release delete $releaseTag -y
               Write-Host "Release删除成功（第$i次尝试）"
               break
             } catch {
-              Write-Warning "第$i次删除Release失败: $_"
+              Write-Warning "第$i次删除失败: $_"
               Start-Sleep -Seconds $retryInterval
             }
           }
 
-          # 删除Tag（重试10次，间隔30秒）
-          Write-Host "`n[Delete Tag] 尝试删除原有Tag: $tagName"
+          Write-Host "`n删除原有Tag: $releaseTag"
           for ($i=1; $i -le $retryTimes; $i++) {
             try {
-              git tag -d $tagName  # 删除本地Tag
-              git push origin --delete $tagName  # 删除远程Tag
+              if (git tag -l $releaseTag) { git tag -d $releaseTag }
+              git push origin --delete $releaseTag
               Write-Host "Tag删除成功（第$i次尝试）"
               break
             } catch {
-              Write-Warning "第$i次删除Tag失败: $_"
+              Write-Warning "第$i次删除失败: $_"
               Start-Sleep -Seconds $retryInterval
             }
           }
@@ -198,57 +211,56 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ==============================================
-      # 5. 上传新分卷ESD到Release（带重试）
+      # 8. 创建Release并上传7z分卷（带重试）
       # ==============================================
-      - name: Upload ESD parts to Release
+      - name: Create Release and upload 7z parts
         run: |
-          $releaseName = "Windows_7_ULT&ENT_32&64"
-          $tagName = "Win7-ULT-ENT-32-64"
+          $releaseTag = "Windows_7_ULT&ENT_32&64"
           $retryTimes = 10
           $retryInterval = 30
+          $7zParts = Get-ChildItem -Path "`"$($env:MAIN_ESD_NAME).7z.*`"" -ErrorAction SilentlyContinue
+          
+          if ($7zParts.Count -eq 0) { throw "无7z分卷文件可上传" }
 
-          # 创建新Release（重试10次）
-          Write-Host "`n[Create Release] 尝试创建新Release: $releaseName"
+          Write-Host "`n创建新Release: $releaseTag"
           for ($i=1; $i -le $retryTimes; $i++) {
             try {
-              gh release create $tagName --title "$releaseName" --notes "Windows7 ULT&ENT 32&64 ESD 分卷文件"
+              gh release create $releaseTag `
+                --title "$releaseTag" `
+                --notes "Windows7 ULT&ENT 32&64 合并ESD（7z分卷1950M/卷）"
               Write-Host "Release创建成功（第$i次尝试）"
               break
             } catch {
-              Write-Warning "第$i次创建Release失败: $_"
+              Write-Warning "第$i次创建失败: $_"
               Start-Sleep -Seconds $retryInterval
             }
           }
 
-          # 上传所有ESD分卷文件（每个文件重试10次）
-          Write-Host "`n[Upload Files] 开始上传ESD分卷文件..."
-          $esdParts = Get-ChildItem -Path "*.esd.part*" -ErrorAction SilentlyContinue
-          if ($esdParts.Count -eq 0) { throw "无ESD分卷文件可上传" }
-
-          foreach ($file in $esdParts) {
+          Write-Host "`n开始上传7z分卷文件..."
+          foreach ($file in $7zParts) {
             $filePath = "`"$($file.FullName)`""
             Write-Host "上传文件: $filePath"
             
             for ($i=1; $i -le $retryTimes; $i++) {
               try {
-                gh release upload $tagName $filePath --clobber
-                Write-Host "文件 $filePath 上传成功（第$i次尝试）"
+                gh release upload $releaseTag $filePath --clobber
+                Write-Host "上传成功（第$i次尝试）"
                 break
               } catch {
-                Write-Warning "第$i次上传 $filePath 失败: $_"
+                Write-Warning "第$i次上传失败: $_"
                 Start-Sleep -Seconds $retryInterval
               }
             }
           }
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # ==============================================
-      # 6. 最终清理临时文件
+      # 9. 最终清理
       # ==============================================
       - name: Final cleanup
         run: |
-          Write-Host "`n[Cleanup] 清理所有临时文件..."
-          # 删除ESD分卷文件
-          Get-ChildItem -Path "*.esd.part*" -ErrorAction SilentlyContinue | Remove-Item -Force
-          # 兜底删除残留的7z/WIM文件
-          Get-ChildItem -Path @("*.7z.*", "*.wim", "*.esd") -ErrorAction SilentlyContinue | Remove-Item -Force
+          Write-Host "`n清理所有临时文件..."
+          Get-ChildItem -Path "`"$($env:MAIN_ESD_NAME).7z.*`"" -ErrorAction SilentlyContinue | Remove-Item -Force
+          Get-ChildItem -Path @("*.7z.*", "*.wim", "`"$env:MAIN_ESD_NAME`"") -ErrorAction SilentlyContinue | Remove-Item -Force
           Write-Host "清理完成"

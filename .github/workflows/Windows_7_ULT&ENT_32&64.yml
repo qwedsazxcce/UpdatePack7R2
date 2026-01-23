@@ -9,7 +9,7 @@ jobs:
   build-and-upload-esd:
     runs-on: windows-latest
     env:
-      # ========== 下载地址变量 ==========
+      # ========== 下载地址变量（保持原版URL） ==========
       install_Windows7x86ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
       install_Windows7x86ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
       install_Windows7x86ULTIMATE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
@@ -22,8 +22,8 @@ jobs:
       install_Windows7x64ENTERPRISE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.001
       install_Windows7x64ENTERPRISE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.002
       install_Windows7x64ENTERPRISE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ENTERPRISE-26.1.15/install_Windows7x64ENTERPRISE-26.1.15.7z.003
-      # ========== 通用配置（新增工作目录变量） ==========
-      WORK_DIR: ${{ github.workspace }}  # GitHub Actions默认工作目录（有完全权限）
+      # ========== 通用配置 ==========
+      WORK_DIR: ${{ github.workspace }}
       ESD_MAIN_FILE: "Windows_7_ULT&ENT_32&64.esd"
       SPLIT_SIZE: "1950M"
       RETRY_COUNT: 10
@@ -34,7 +34,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ========== 步骤1：循环处理每个版本（核心修复权限+路径） ==========
+      # ========== 步骤1：循环处理每个版本（核心修复） ==========
       - name: Process each Windows 7 version
         shell: pwsh
         run: |
@@ -50,8 +50,8 @@ jobs:
             $index = $version.Index
             Write-Host "===== 开始处理版本：$prefix ====="
 
-            # ---------- 子步骤1.1：下载分卷+校验 ----------
-            Write-Host "下载并校验 $prefix 分卷"
+            # ---------- 子步骤1.1：下载分卷（还原原版curl命令） ----------
+            Write-Host "下载 $prefix 分卷（使用原版curl命令）"
             $volumes = @("001", "002", "003")
             foreach ($vol in $volumes) {
               $varName = "$prefix`_$vol"
@@ -60,43 +60,41 @@ jobs:
                 Write-Warning "变量 $varName 未定义，跳过该分卷"
                 continue
               }
-              # 分卷文件名保持和URL一致（避免7z识别错误）
-              $fileName = "$prefix-$vol.7z"
+              # 修复：分卷文件名还原为7z标准格式（文件名.7z.001）
+              $fileName = "$prefix.7z.$vol"
               $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
-              # 下载（强制覆盖+校验）
-              curl.exe -L -f -sS -o "$filePath" "$url"
+              # 还原原版curl命令：仅保留 -L（跟随重定向）、-o（输出文件）
+              curl.exe -L -o "$filePath" "$url"
               if ($LASTEXITCODE -ne 0) {
-                throw "下载 $fileName 失败，退出码：$LASTEXITCODE"
+                throw "下载 $fileName 失败（URL：$url），curl退出码：$LASTEXITCODE"
               }
-              # 校验文件大小
+              # 校验文件大小（避免空文件）
               $fileSize = (Get-Item "$filePath").Length
               if ($fileSize -eq 0) {
-                throw "$fileName 下载后为空文件（大小0字节）"
+                throw "$fileName 下载后为空文件（大小0字节），URL可能无效"
               }
               Write-Host "$fileName 下载成功（大小：$([math]::Round($fileSize/1MB,2)) MB）"
             }
 
-            # ---------- 子步骤1.2：修复核心：指定有权限的解压目录+提前创建 ----------
-            Write-Host "创建解压目录（工作目录内，避免权限问题）"
-            # 1. 定义绝对解压路径（在GitHub工作目录下，有完全权限）
+            # ---------- 子步骤1.2：创建解压目录（保留权限修复） ----------
+            Write-Host "创建解压目录（工作目录内）"
             $extractDir = Join-Path -Path $env:WORK_DIR -ChildPath "extract_$prefix"
-            # 2. 提前创建目录（避免7z自动创建时权限不足）
             if (Test-Path $extractDir) {
               Remove-Item -Path $extractDir -Recurse -Force
             }
             New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
-            Write-Host "解压目录：$extractDir（权限已确认）"
+            Write-Host "解压目录：$extractDir"
 
-            # 3. 解压分卷（用001文件作为入口，指定绝对路径）
-            $firstVol = Join-Path -Path $env:WORK_DIR -ChildPath "$prefix-001.7z"
-            Write-Host "开始解压分卷：$firstVol"
-            # 7z命令：-o后直接跟绝对路径（无空格），-bb1输出基础日志
+            # ---------- 子步骤1.3：解压分卷（使用7z标准命名的001文件） ----------
+            Write-Host "开始解压 $prefix 分卷"
+            $firstVol = Join-Path -Path $env:WORK_DIR -ChildPath "$prefix.7z.001"
+            # 7z解压：使用标准分卷入口文件，保留绝对路径
             7z x -y -bb1 -o"$extractDir" "$firstVol"
             if ($LASTEXITCODE -ge 2) {
               throw "解压 $prefix 失败，7z退出码：$LASTEXITCODE"
             }
 
-            # ---------- 子步骤1.3：查找WIM文件 ----------
+            # ---------- 子步骤1.4：查找WIM文件 ----------
             Write-Host "查找WIM文件"
             $wimFiles = Get-ChildItem -Path $extractDir -Filter "*.wim" -Recurse
             if ($wimFiles.Count -eq 0) {
@@ -105,7 +103,7 @@ jobs:
             $wimPath = "`"$($wimFiles[0].FullName)`""
             Write-Host "找到WIM文件：$($wimFiles[0].FullName)"
 
-            # ---------- 子步骤1.4：CMD转换WIM到ESD ----------
+            # ---------- 子步骤1.5：转换WIM到ESD ----------
             Write-Host "转换WIM到ESD（索引：$index）"
             $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
             $esdPathQuote = "`"$esdPath`""
@@ -116,11 +114,11 @@ jobs:
               throw "DISM转换失败，退出码：$LASTEXITCODE"
             }
 
-            # ---------- 子步骤1.5：清理临时文件 ----------
+            # ---------- 子步骤1.6：清理临时文件 ----------
             Write-Host "清理 $prefix 临时文件"
             # 删除分卷文件
             foreach ($vol in $volumes) {
-              $fileName = "$prefix-$vol.7z"
+              $fileName = "$prefix.7z.$vol"
               $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
               if (Test-Path $filePath) {
                 Remove-Item -Path $filePath -Force
@@ -134,22 +132,20 @@ jobs:
             Write-Host "===== 完成处理版本：$prefix ====="
           }
 
-      # ========== 步骤2：分卷压缩最终ESD文件 ==========
+      # ========== 步骤2：分卷压缩ESD ==========
       - name: Split compress ESD file
         shell: pwsh
         run: |
           Write-Host "分卷压缩 ESD 文件"
           $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
           $splitOutput = Join-Path -Path $env:WORK_DIR -ChildPath "$($env:ESD_MAIN_FILE).7z"
-          # 分卷压缩（指定工作目录，避免权限问题）
           7z a -y -v$($env:SPLIT_SIZE) "$splitOutput" "$esdPath"
           if ($LASTEXITCODE -ge 2) {
             throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
           }
-          # 删除原始ESD
           Remove-Item -Path $esdPath -Force
 
-      # ========== 步骤3：GH CLI上传（删除旧版本+重试） ==========
+      # ========== 步骤3：GH CLI上传 ==========
       - name: Upload via GitHub CLI with retry
         shell: pwsh
         env:
@@ -160,20 +156,16 @@ jobs:
           $retryCount = [int]$env:RETRY_COUNT
           $retryInterval = [int]$env:RETRY_INTERVAL
 
-          # 删除旧Release/Tag
           Write-Host "删除原有Release/Tag：$releaseName"
           gh release delete "$releaseName" -y 2>&1 | Out-Null
           git tag -d "$releaseName" 2>&1 | Out-Null
           git push origin --delete "$releaseName" 2>&1 | Out-Null
 
-          # 上传重试逻辑
           $uploadSuccess = $false
           for ($i=1; $i -le $retryCount; $i++) {
             try {
               Write-Host "第 $i 次上传（共 $retryCount 次）"
-              # 创建新Release
               gh release create "$releaseName" --title "$releaseName" --notes "Auto-built Windows 7 ESD"
-              # 上传所有分卷
               foreach ($file in $splitFiles) {
                 gh release upload "$releaseName" "`"$($file.FullName)`"" --clobber
               }
@@ -194,14 +186,12 @@ jobs:
             throw "重试 $retryCount 次后仍上传失败"
           }
 
-      # ========== 步骤4：最终兜底清理 ==========
+      # ========== 步骤4：最终清理 ==========
       - name: Final cleanup
         shell: pwsh
         if: always()
         run: |
           Write-Host "执行最终清理"
-          # 删除临时解压目录
           Get-ChildItem -Path $env:WORK_DIR -Filter "extract_*" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          # 删除残留分卷源文件
           Get-ChildItem -Path $env:WORK_DIR -Filter "install_Windows7*.7z.00*" | Remove-Item -Force -ErrorAction SilentlyContinue
           Write-Host "清理完成"

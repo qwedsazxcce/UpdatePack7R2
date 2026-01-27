@@ -1,0 +1,227 @@
+name: Windows7_Ult_32&64
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - '.github/workflows/Windows7_Ult_32&64.yml'  # 同步修改yml文件名引用
+
+jobs:
+  build-and-upload-esd:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      # 仅保留旗舰版（ULTIMATE）相关变量，移除所有企业版（ENTERPRISE）变量
+      install_Windows7x86ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.001
+      install_Windows7x86ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.002
+      install_Windows7x86ULTIMATE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x86ULTIMATE-26.1.15/install_Windows7x86ULTIMATE-26.1.15.7z.003
+      install_Windows7x64ULTIMATE_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.001
+      install_Windows7x64ULTIMATE_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.002
+      install_Windows7x64ULTIMATE_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_Windows7x64ULTIMATE-26.1.15/install_Windows7x64ULTIMATE-26.1.15.7z.003
+      WORK_DIR: ${{ github.workspace }}
+      ESD_MAIN_FILE: Windows7_Ult_32&64.esd  # 修改ESD文件名
+      SPLIT_SIZE: 1950M
+      RETRY_COUNT: 10
+      RETRY_INTERVAL: 30
+      RELEASE_NAME: Windows7_Ult_32&64  # 修改Release名称
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Delete existing Release and Tag (with full log)
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $releaseName = $env:RELEASE_NAME
+          Write-Host "===== 开始清理旧版本：$releaseName ====="
+          
+          # 步骤1：列出当前所有Release/Tag（便于排查）
+          Write-Host "当前仓库的Release列表："
+          $releaseList = gh release list 2>&1
+          if ($LASTEXITCODE -eq 0) { Write-Host $releaseList } else { Write-Host "暂无Release" }
+          
+          Write-Host "当前本地Tag列表："
+          $localTags = git tag --list
+          if ($localTags) { Write-Host $localTags } else { Write-Host "暂无本地Tag" }
+          
+          Write-Host "当前远程Tag列表（筛选$releaseName）："
+          $remoteTags = git ls-remote --tags origin | FindStr $releaseName 2>&1
+          if ($remoteTags) { Write-Host $remoteTags } else { Write-Host "暂无远程Tag: $releaseName" }
+
+          # 步骤2：删除Release（包括Draft，显式检查）
+          Write-Host "`n[1/3] 删除Release..."
+          $releaseExists = gh release view "$releaseName" 2>&1
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete "$releaseName" -y
+            Write-Host "[成功] Release '$releaseName' 已删除"
+          } else {
+            Write-Host "[信息] Release '$releaseName' 不存在，跳过删除"
+          }
+
+          # 步骤3：删除远程Tag（修正路径格式 + 显式检查）
+          Write-Host "`n[2/3] 删除远程Tag..."
+          $tagRef = "refs/tags/$releaseName"
+          $remoteTagExists = git ls-remote --tags origin "$tagRef" 2>&1
+          if ($remoteTagExists) {
+            git push origin --delete "$tagRef"
+            Write-Host "[成功] 远程Tag '$releaseName' 已删除"
+          } else {
+            Write-Host "[信息] 远程Tag '$releaseName' 不存在，跳过删除"
+          }
+
+          # 步骤4：删除本地Tag（显式检查）
+          Write-Host "`n[3/3] 删除本地Tag..."
+          if (git tag --list "$releaseName") {
+            git tag -d "$releaseName"
+            Write-Host "[成功] 本地Tag '$releaseName' 已删除"
+          } else {
+            Write-Host "[信息] 本地Tag '$releaseName' 不存在，跳过删除"
+          }
+
+          Write-Host "`n===== 清理旧版本完成 =====`n"
+
+      - name: Process each Windows 7 version
+        shell: pwsh
+        run: |
+          # 仅保留旗舰版（ULTIMATE）处理逻辑，移除企业版（ENTERPRISE）
+          $versions = @(
+            @{ Prefix = "install_Windows7x86ULTIMATE"; Index = 5 },
+            @{ Prefix = "install_Windows7x64ULTIMATE"; Index = 4 }
+          )
+          
+          foreach ($version in $versions) {
+            $prefix = $version.Prefix
+            $index = $version.Index
+            Write-Host "===== 开始处理版本：$prefix ====="
+
+            Write-Host "下载 $prefix 分卷"
+            $volumes = @("001", "002", "003")
+            foreach ($vol in $volumes) {
+              $varName = "$prefix`_$vol"
+              $url = [Environment]::GetEnvironmentVariable($varName)
+              if (-not $url) {
+                Write-Warning "变量 $varName 未定义，跳过该分卷"
+              }
+              $fileName = "$prefix.7z.$vol"
+              $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
+              curl.exe -L -o "$filePath" "$url"
+              if ($LASTEXITCODE -ne 0) {
+                throw "下载 $fileName 失败，curl退出码：$LASTEXITCODE"
+              }
+              $fileSize = (Get-Item "$filePath").Length
+              if ($fileSize -eq 0) {
+                throw "$fileName 下载后为空文件"
+              }
+              Write-Host "$fileName 下载成功（大小：$([math]::Round($fileSize/1MB,2)) MB）"
+            }
+
+            Write-Host "创建解压目录"
+            $extractDir = Join-Path -Path $env:WORK_DIR -ChildPath "extract_$prefix"
+            if (Test-Path $extractDir) {
+              Remove-Item -Path $extractDir -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+            Write-Host "解压目录：$extractDir"
+
+            Write-Host "开始解压 $prefix 分卷"
+            $firstVol = Join-Path -Path $env:WORK_DIR -ChildPath "$prefix.7z.001"
+            7z x -y -bb1 -o"$extractDir" "$firstVol"
+            if ($LASTEXITCODE -ge 2) {
+              throw "解压 $prefix 失败，7z退出码：$LASTEXITCODE"
+            }
+
+            Write-Host "查找WIM文件"
+            $wimFiles = Get-ChildItem -Path $extractDir -Filter "*.wim" -Recurse
+            if ($wimFiles.Count -eq 0) {
+              throw "在 $extractDir 中未找到WIM文件"
+            }
+            $wimPath = "`"$($wimFiles[0].FullName)`""
+            Write-Host "找到WIM文件：$($wimFiles[0].FullName)"
+
+            Write-Host "转换WIM到ESD（索引：$index）"
+            $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
+            $esdPathQuote = "`"$esdPath`""
+            $dismCmd = "dism /export-image /sourceimagefile=$wimPath /sourceindex=$index /destinationimagefile=$esdPathQuote /compress:recovery /checkintegrity"
+            cmd /c $dismCmd
+            if ($LASTEXITCODE -ne 0) {
+              throw "DISM转换失败，退出码：$LASTEXITCODE"
+            }
+
+            Write-Host "清理 $prefix 临时文件"
+            foreach ($vol in $volumes) {
+              $fileName = "$prefix.7z.$vol"
+              $filePath = Join-Path -Path $env:WORK_DIR -ChildPath $fileName
+              if (Test-Path $filePath) {
+                Remove-Item -Path $filePath -Force
+              }
+            }
+            if (Test-Path $extractDir) {
+              Remove-Item -Path $extractDir -Recurse -Force
+            }
+
+            Write-Host "===== 完成处理版本：$prefix ====="
+          }
+
+      - name: Split compress ESD file
+        shell: pwsh
+        run: |
+          Write-Host "分卷压缩 ESD 文件"
+          $esdPath = Join-Path -Path $env:WORK_DIR -ChildPath $env:ESD_MAIN_FILE
+          $splitOutput = Join-Path -Path $env:WORK_DIR -ChildPath "$($env:ESD_MAIN_FILE).7z"
+          $volParam = "-v$($env:SPLIT_SIZE)"
+          7z a -y $volParam "$splitOutput" "$esdPath"
+          if ($LASTEXITCODE -ge 2) {
+            throw "7z分卷压缩失败，退出码：$LASTEXITCODE"
+          }
+          Remove-Item -Path $esdPath -Force
+
+      - name: Upload via GitHub CLI with retry
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $releaseName = $env:RELEASE_NAME
+          $splitFiles = Get-ChildItem -LiteralPath "$env:WORK_DIR" -Filter "$($env:ESD_MAIN_FILE).7z.*" -ErrorAction Stop
+          $retryCount = [int]$env:RETRY_COUNT
+          $retryInterval = [int]$env:RETRY_INTERVAL
+
+          if ($splitFiles.Count -eq 0) {
+            throw "未找到分卷压缩文件！路径：$env:WORK_DIR\$($env:ESD_MAIN_FILE).7z.*"
+          }
+
+          $uploadSuccess = $false
+          for ($i=1; $i -le $retryCount; $i++) {
+            try {
+              Write-Host "第 $i 次上传（共 $retryCount 次），文件数：$($splitFiles.Count)"
+              gh release create "$releaseName" `
+                --title "$releaseName" `
+                --notes "Auto-built Windows 7 ESD" `
+                --latest `
+                $splitFiles.FullName
+              $uploadSuccess = $true
+              Write-Host "上传成功"
+              break
+            }
+            catch {
+              Write-Warning "第 $i 次上传失败：$($_.Exception.Message)"
+              if ($i -lt $retryCount) {
+                Write-Host "等待 $retryInterval 秒后重试..."
+                Start-Sleep -Seconds $retryInterval
+              }
+            }
+          }
+
+          if (-not $uploadSuccess) {
+            throw "重试 $retryCount 次后仍上传失败"
+          }
+
+      - name: Final cleanup
+        shell: pwsh
+        if: always()
+        run: |
+          Write-Host "执行最终清理"
+          Get-ChildItem -Path $env:WORK_DIR -Filter "extract_*" -Directory | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          Get-ChildItem -Path $env:WORK_DIR -Filter "install_Windows7*.7z.00*" | Remove-Item -Force -ErrorAction SilentlyContinue
+          Write-Host "清理完成"

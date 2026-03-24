@@ -3,7 +3,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - '.github/workflows/ultentserver2008r2.yml'
+      - '.github/workflows/ultentserver2008r2.yml'  # 修正为你的文件名
 
 jobs:
   build-and-upload-combined-esd:
@@ -19,13 +19,10 @@ jobs:
       SERVER_ESD_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.003
       SERVER_ESD_004: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.004
 
-      ########################### 【修复点1】修正Server ESD真实文件名 ###########################
+      ########################### 固定配置 ###########################
       WORK_DIR: ${{ github.workspace }}
       MAIN_ESD: Windows7_Ult&Ent_32&64.esd
       TEMP_WIM: temp_server2008r2.wim
-      # 错误写法：install_WindowsServer_2008R2_SP1.esd
-      # 正确写法：带版本号 26.1.15
-      SERVER_ESD_FILE: install_WindowsServer_2008R2_SP1-26.1.15.esd
       SPLIT_SIZE: 1950M
       RELEASE_NAME: Windows7_Server2008R2_Combined
       RETRY_COUNT: 10
@@ -44,7 +41,6 @@ jobs:
           Write-Host "===== 清理旧版本：$release ====="
           if (gh release view "$release" 2>&1) {
             gh release delete "$release" -y
-            Write-Host "旧Release已删除"
           }
           git tag -d "$release" 2>&1 | Out-Null
           git push origin --delete "refs/tags/$release" 2>&1 | Out-Null
@@ -58,7 +54,6 @@ jobs:
           foreach($vol in $vols){
             $url = [Environment]::GetEnvironmentVariable("WIN7_ESD_$vol")
             $file = "Win7_ESD.7z.$vol"
-            Write-Host "下载：$file"
             curl.exe -L -o "$env:WORK_DIR\$file" "$url"
           }
           7z x -y -o"$env:WORK_DIR" "$env:WORK_DIR\Win7_ESD.7z.001"
@@ -73,32 +68,40 @@ jobs:
           foreach($vol in $vols){
             $url = [Environment]::GetEnvironmentVariable("SERVER_ESD_$vol")
             $file = "Server_ESD.7z.$vol"
-            Write-Host "下载：$file"
             curl.exe -L -o "$env:WORK_DIR\$file" "$url"
           }
+          # 解压分卷
           7z x -y -o"$env:WORK_DIR" "$env:WORK_DIR\Server_ESD.7z.001"
+          # 删除压缩包
           Remove-Item "$env:WORK_DIR\Server_ESD.7z.*" -Force
           Write-Host "===== Server2008R2 ESD 处理完成 =====`n"
 
-      # 【修复点2】增加文件存在校验 + 正确文件名
+      # ===================== 核心修复：自动搜索获取ESD文件名 =====================
       - name: Export Server2008R2 Image Index 5 to Temp WIM
         shell: pwsh
         run: |
-          Write-Host "===== 提取 Server2008R2 第5个镜像 ====="
-          $esdPath = Join-Path $env:WORK_DIR $env:SERVER_ESD_FILE
+          Write-Host "===== 自动搜索 Server2008R2 ESD 文件 ====="
+          # 自动获取当前目录下 非Win7主ESD 的 所有ESD文件（就是Server的ESD）
+          $serverEsd = Get-ChildItem -Path $env:WORK_DIR -Filter "*.esd" | Where-Object { $_.Name -ne $env:MAIN_ESD } | Select-Object -First 1
           
-          # 新增：检查文件是否存在，不存在直接报错
-          if (-not (Test-Path $esdPath)) {
-              throw "ERROR：找不到Server ESD文件！路径：$esdPath"
+          if (-not $serverEsd) {
+              throw "ERROR：未找到任何 Server ESD 文件！"
           }
           
-          $esd = "`"$esdPath`""
+          # 输出找到的文件信息（方便排查）
+          Write-Host "✅ 找到 Server ESD 文件：$($serverEsd.FullName)"
+          $esd = "`"$($serverEsd.FullName)`""
           $wim = "`"$env:WORK_DIR\$env:TEMP_WIM`""
+
+          # 执行DISM提取
           cmd /c "dism /export-image /sourceimagefile:$esd /sourceindex:5 /destinationimagefile:$wim /compress:max /checkintegrity"
           if ($LASTEXITCODE -ne 0) {
               throw "DISM 提取镜像失败！"
           }
           Write-Host "===== 镜像提取完成 =====`n"
+
+          # 保存Server ESD文件名到临时文件，供后续清理使用
+          $serverEsd.Name | Out-File "$env:WORK_DIR\server_esd_name.txt" -Encoding UTF8
 
       - name: Append Server Image to Main Windows7 ESD
         shell: pwsh
@@ -116,8 +119,11 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "===== 清理临时文件 ====="
-          Remove-Item "$env:WORK_DIR\$env:SERVER_ESD_FILE" -Force
+          # 读取自动获取的Server ESD文件名并删除
+          $serverEsdName = Get-Content "$env:WORK_DIR\server_esd_name.txt" -Raw
+          Remove-Item "$env:WORK_DIR\$serverEsdName" -Force -ErrorAction SilentlyContinue
           Remove-Item "$env:WORK_DIR\$env:TEMP_WIM" -Force
+          Remove-Item "$env:WORK_DIR\server_esd_name.txt" -Force
           Write-Host "===== 清理完成 =====`n"
 
       - name: Split Compress Final ESD

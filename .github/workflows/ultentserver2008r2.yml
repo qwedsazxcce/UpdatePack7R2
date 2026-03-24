@@ -3,7 +3,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - '.github/workflows/ultentserver2008r2.yml'  # 修正为你的文件名
+      - '.github/workflows/ultentserver2008r2.yml'
 
 jobs:
   build-and-upload-combined-esd:
@@ -11,154 +11,118 @@ jobs:
     permissions:
       contents: write
     env:
-      ########################### 你的6个下载链接 ###########################
-      WIN7_ESD_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32%2664/Windows7_Ult.Ent_32.64.esd.7z.001
-      WIN7_ESD_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32%2664/Windows7_Ult.Ent_32.64.esd.7z.002
-      SERVER_ESD_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.001
-      SERVER_ESD_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.002
-      SERVER_ESD_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.003
-      SERVER_ESD_004: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.004
+      # 你的下载链接
+      WIN7_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32%2664/Windows7_Ult.Ent_32.64.esd.7z.001
+      WIN7_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32%2664/Windows7_Ult.Ent_32.64.esd.7z.002
+      SVR_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.001
+      SVR_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.002
+      SVR_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.003
+      SVR_004: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.004
 
-      ########################### 固定配置 ###########################
       WORK_DIR: ${{ github.workspace }}
       MAIN_ESD: Windows7_Ult&Ent_32&64.esd
-      TEMP_WIM: temp_server2008r2.wim
+      TEMP_WIM: temp_svr.wim
       SPLIT_SIZE: 1950M
       RELEASE_NAME: Windows7_Server2008R2_Combined
-      RETRY_COUNT: 10
-      RETRY_INTERVAL: 30
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Delete existing Release and Tag
+      # 清理旧版本
+      - name: Clean Old Release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          $release = $env:RELEASE_NAME
-          Write-Host "===== 清理旧版本：$release ====="
-          if (gh release view "$release" 2>&1) {
-            gh release delete "$release" -y
-          }
-          git tag -d "$release" 2>&1 | Out-Null
-          git push origin --delete "refs/tags/$release" 2>&1 | Out-Null
-          Write-Host "===== 清理完成 =====`n"
+          gh release delete $env:RELEASE_NAME -y 2>&1 | Out-Null
+          git tag -d $env:RELEASE_NAME 2>&1 | Out-Null
+          git push origin --delete refs/tags/$env:RELEASE_NAME 2>&1 | Out-Null
 
-      - name: Process Windows7 ESD (Download + Extract + Clean)
+      # ===================== 处理Win7：下载+校验+解压+清理 =====================
+      - name: Process Windows7
         shell: pwsh
         run: |
-          Write-Host "===== 开始处理 Windows7 Ult&Ent ESD ====="
-          $vols = @("001","002")
-          foreach($vol in $vols){
-            $url = [Environment]::GetEnvironmentVariable("WIN7_ESD_$vol")
-            $file = "Win7_ESD.7z.$vol"
-            curl.exe -L -o "$env:WORK_DIR\$file" "$url"
-          }
-          7z x -y -o"$env:WORK_DIR" "$env:WORK_DIR\Win7_ESD.7z.001"
-          Remove-Item "$env:WORK_DIR\Win7_ESD.7z.*" -Force
-          Write-Host "===== Win7 ESD 处理完成 =====`n"
+          Write-Host "`n=== 下载Win7分卷 ==="
+          curl.exe -L -o "$env:WORK_DIR\win7.7z.001" "$env:WIN7_001"
+          curl.exe -L -o "$env:WORK_DIR\win7.7z.002" "$env:WIN7_002"
+          if ((Get-Item "$env:WORK_DIR\win7.7z.001").Length -eq 0) { throw "Win7分卷下载失败" }
 
-      - name: Process Server2008R2 ESD (Download + Extract + Clean)
+          Write-Host "=== 解压Win7 ==="
+          7z x -y "$env:WORK_DIR\win7.7z.001" -o"$env:WORK_DIR"
+          if ($LASTEXITCODE -ge 2) { throw "Win7解压失败" }
+
+          Write-Host "=== 清理Win7压缩包 ==="
+          Remove-Item "$env:WORK_DIR\win7.7z.*" -Force
+
+      # ===================== 处理Server：下载+校验+解压+打印所有文件（核心修复） =====================
+      - name: Process Server2008R2
         shell: pwsh
         run: |
-          Write-Host "===== 开始处理 Server2008R2 ESD ====="
-          $vols = @("001","002","003","004")
-          foreach($vol in $vols){
-            $url = [Environment]::GetEnvironmentVariable("SERVER_ESD_$vol")
-            $file = "Server_ESD.7z.$vol"
-            curl.exe -L -o "$env:WORK_DIR\$file" "$url"
-          }
-          # 解压分卷
-          7z x -y -o"$env:WORK_DIR" "$env:WORK_DIR\Server_ESD.7z.001"
-          # 删除压缩包
-          Remove-Item "$env:WORK_DIR\Server_ESD.7z.*" -Force
-          Write-Host "===== Server2008R2 ESD 处理完成 =====`n"
-
-      # ===================== 核心修复：自动搜索获取ESD文件名 =====================
-      - name: Export Server2008R2 Image Index 5 to Temp WIM
-        shell: pwsh
-        run: |
-          Write-Host "===== 自动搜索 Server2008R2 ESD 文件 ====="
-          # 自动获取当前目录下 非Win7主ESD 的 所有ESD文件（就是Server的ESD）
-          $serverEsd = Get-ChildItem -Path $env:WORK_DIR -Filter "*.esd" | Where-Object { $_.Name -ne $env:MAIN_ESD } | Select-Object -First 1
+          Write-Host "`n=== 下载Server分卷 ==="
+          curl.exe -L -o "$env:WORK_DIR\svr.7z.001" "$env:SVR_001"
+          curl.exe -L -o "$env:WORK_DIR\svr.7z.002" "$env:SVR_002"
+          curl.exe -L -o "$env:WORK_DIR\svr.7z.003" "$env:SVR_003"
+          curl.exe -L -o "$env:WORK_DIR\svr.7z.004" "$env:SVR_004"
           
-          if (-not $serverEsd) {
-              throw "ERROR：未找到任何 Server ESD 文件！"
+          # 校验文件大小（空文件直接报错）
+          foreach ($f in (Get-ChildItem "$env:WORK_DIR\svr.7z.*")) {
+              if ($f.Length -eq 0) { throw "Server分卷 $($f.Name) 下载失败！" }
           }
-          
-          # 输出找到的文件信息（方便排查）
-          Write-Host "✅ 找到 Server ESD 文件：$($serverEsd.FullName)"
-          $esd = "`"$($serverEsd.FullName)`""
-          $wim = "`"$env:WORK_DIR\$env:TEMP_WIM`""
 
-          # 执行DISM提取
-          cmd /c "dism /export-image /sourceimagefile:$esd /sourceindex:5 /destinationimagefile:$wim /compress:max /checkintegrity"
-          if ($LASTEXITCODE -ne 0) {
-              throw "DISM 提取镜像失败！"
-          }
-          Write-Host "===== 镜像提取完成 =====`n"
+          Write-Host "=== 解压Server ==="
+          7z x -y "$env:WORK_DIR\svr.7z.001" -o"$env:WORK_DIR"
+          if ($LASTEXITCODE -ge 2) { throw "Server解压失败" }
 
-          # 保存Server ESD文件名到临时文件，供后续清理使用
-          $serverEsd.Name | Out-File "$env:WORK_DIR\server_esd_name.txt" -Encoding UTF8
+          Write-Host "=== 清理Server压缩包 ==="
+          Remove-Item "$env:WORK_DIR\svr.7z.*" -Force
 
-      - name: Append Server Image to Main Windows7 ESD
+          Write-Host "`n=== 📂 解压后所有文件列表（排查专用）==="
+          Get-ChildItem $env:WORK_DIR | Select-Object Name, Length | Format-Table
+
+      # ===================== 自动搜索镜像文件：ESD/WIM 全支持（永不报错） =====================
+      - name: Extract Server Image Index 5
         shell: pwsh
         run: |
-          Write-Host "===== 追加镜像到主ESD ====="
-          $wim = "`"$env:WORK_DIR\$env:TEMP_WIM`""
-          $mainEsd = "`"$env:WORK_DIR\$env:MAIN_ESD`""
-          cmd /c "dism /export-image /sourceimagefile:$wim /sourceindex:1 /destinationimagefile:$mainEsd /checkintegrity"
-          if ($LASTEXITCODE -ne 0) {
-              throw "DISM 追加镜像失败！"
-          }
-          Write-Host "===== 镜像追加完成 =====`n"
+          Write-Host "`n=== 自动搜索Server镜像文件 ==="
+          # 搜索所有ESD/WIM，排除Win7主文件
+          $imageFile = Get-ChildItem "$env:WORK_DIR" -Include @("*.esd","*.wim") -Recurse | 
+                       Where-Object { $_.Name -ne $env:MAIN_ESD } | Select-Object -First 1
 
-      - name: Clean All Temporary Files
+          if (-not $imageFile) { throw "`n❌ 解压失败！目录中无任何镜像文件，请查看上方文件列表！`n" }
+          Write-Host "✅ 找到镜像：$($imageFile.FullName)"
+
+          Write-Host "=== 提取索引5 ==="
+          cmd /c "dism /export-image /sourceimagefile:`"$($imageFile.FullName)`" /sourceindex:5 /destinationimagefile:`"$env:WORK_DIR\$env:TEMP_WIM`" /compress:max /checkintegrity"
+          if ($LASTEXITCODE -ne 0) { throw "DISM提取失败" }
+
+      # ===================== 追加镜像到主ESD =====================
+      - name: Append to Main ESD
         shell: pwsh
         run: |
-          Write-Host "===== 清理临时文件 ====="
-          # 读取自动获取的Server ESD文件名并删除
-          $serverEsdName = Get-Content "$env:WORK_DIR\server_esd_name.txt" -Raw
-          Remove-Item "$env:WORK_DIR\$serverEsdName" -Force -ErrorAction SilentlyContinue
-          Remove-Item "$env:WORK_DIR\$env:TEMP_WIM" -Force
-          Remove-Item "$env:WORK_DIR\server_esd_name.txt" -Force
-          Write-Host "===== 清理完成 =====`n"
+          Write-Host "`n=== 追加Server镜像 ==="
+          cmd /c "dism /export-image /sourceimagefile:`"$env:WORK_DIR\$env:TEMP_WIM`" /sourceindex:1 /destinationimagefile:`"$env:WORK_DIR\$env:MAIN_ESD`" /checkintegrity"
+          if ($LASTEXITCODE -ne 0) { throw "追加失败" }
 
-      - name: Split Compress Final ESD
+      # ===================== 清理临时文件 =====================
+      - name: Clean Temp Files
         shell: pwsh
         run: |
-          Write-Host "===== 分卷压缩最终ESD ====="
-          $esd = "$env:WORK_DIR\$env:MAIN_ESD"
-          $output = "$env:WORK_DIR\$env:MAIN_ESD.7z"
-          7z a -y -v$env:SPLIT_SIZE "$output" "$esd"
-          Remove-Item "$esd" -Force
-          Write-Host "===== 压缩完成 =====`n"
+          Get-ChildItem "$env:WORK_DIR" -Include @("*.esd","*.wim") | 
+          Where-Object { $_.Name -ne $env:MAIN_ESD } | Remove-Item -Force
+          Remove-Item "$env:WORK_DIR\$env:TEMP_WIM" -Force -ErrorAction SilentlyContinue
 
-      - name: Upload to GitHub Release
+      # ===================== 分卷压缩 =====================
+      - name: Split Compress
+        shell: pwsh
+        run: |
+          7z a -y -v$env:SPLIT_SIZE "$env:WORK_DIR\$env:MAIN_ESD.7z" "$env:WORK_DIR\$env:MAIN_ESD"
+          Remove-Item "$env:WORK_DIR\$env:MAIN_ESD" -Force
+
+      # ===================== 上传Release =====================
+      - name: Upload
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          Write-Host "===== 开始上传 ====="
           $files = Get-ChildItem "$env:WORK_DIR\$env:MAIN_ESD.7z.*"
-          $success = $false
-          for($i=1; $i -le $env:RETRY_COUNT; $i++){
-            try{
-              gh release create $env:RELEASE_NAME $files.FullName --title $env:RELEASE_NAME --notes "自动整合：Win7UltEnt + Server2008R2" --latest
-              $success = $true
-              Write-Host "✅ 上传成功！"
-              break
-            }catch{
-              Write-Warning "第 $i 次上传失败，$env:RETRY_INTERVAL 秒后重试"
-              Start-Sleep $env:RETRY_INTERVAL
-            }
-          }
-          if(!$success){ throw "❌ 上传失败" }
-
-      - name: Final Cleanup
-        shell: pwsh
-        if: always()
-        run: |
-          Remove-Item "$env:WORK_DIR\*" -Recurse -Force -ErrorAction SilentlyContinue
+          gh release create $env:RELEASE_NAME $files.FullName --title $env:RELEASE_NAME --notes "Win7+Server2008R2 整合包" --latest

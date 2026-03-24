@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - '.github/workflows/ult+ent+server2008r2.yml'
+      - '.github/workflows/ultentserver2008r2.yml'
 
 jobs:
   build-and-upload-combined-esd:

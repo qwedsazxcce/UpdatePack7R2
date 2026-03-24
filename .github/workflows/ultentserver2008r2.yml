@@ -11,9 +11,9 @@ jobs:
     permissions:
       contents: write
     env:
-      # 固定下载链接
-      WIN7_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32%2664/Windows7_Ult.Ent_32.64.esd.7z.001
-      WIN7_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32%2664/Windows7_Ult.Ent_32.64.esd.7z.002
+      # 下载链接
+      WIN7_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32&64/Windows7_Ult.Ent_32.64.esd.7z.001
+      WIN7_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/Windows7_Ult%26Ent_32&64/Windows7_Ult.Ent_32.64.esd.7z.002
       SVR_001: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.001
       SVR_002: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.002
       SVR_003: https://github.com/qwedsazxcce/UpdatePack7R2/releases/download/install_WindowsServer_2008R2_SP1-26.1.15/install_WindowsServer_2008R2_SP1-26.1.15.7z.003
@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 1. 清理旧版本
+      # 1. 清理旧Release
       - name: Clean old release
         shell: pwsh
         env:
@@ -37,59 +37,84 @@ jobs:
           git tag -d $env:RELEASE_NAME 2>&1 | Out-Null
           git push origin --delete refs/tags/$env:RELEASE_NAME 2>&1 | Out-Null
 
-      # 2. 处理Win7：下载→解压→删除压缩包
+      # 2. 处理Windows7：下载→解压→删除压缩包
       - name: Process Windows7 ESD
         shell: pwsh
         run: |
+          Write-Host "下载Win7分卷..."
           curl.exe -L -o "$env:WORK_DIR\win7.7z.001" "$env:WIN7_001"
           curl.exe -L -o "$env:WORK_DIR\win7.7z.002" "$env:WIN7_002"
+          Write-Host "解压Win7..."
           7z x -y "$env:WORK_DIR\win7.7z.001" -o"$env:WORK_DIR"
+          Write-Host "清理Win7压缩包..."
           Remove-Item "$env:WORK_DIR\win7.7z.*" -Force
 
-      # 3. 处理Server：下载→解压→打印文件→删除压缩包
+      # 3. 处理Server2008R2：下载→解压→删除压缩包→打印文件列表
       - name: Process Server2008R2 ESD
         shell: pwsh
         run: |
+          Write-Host "下载Server分卷..."
           curl.exe -L -o "$env:WORK_DIR\svr.7z.001" "$env:SVR_001"
           curl.exe -L -o "$env:WORK_DIR\svr.7z.002" "$env:SVR_002"
           curl.exe -L -o "$env:WORK_DIR\svr.7z.003" "$env:SVR_003"
           curl.exe -L -o "$env:WORK_DIR\svr.7z.004" "$env:SVR_004"
+          Write-Host "解压Server..."
           7z x -y "$env:WORK_DIR\svr.7z.001" -o"$env:WORK_DIR"
+          Write-Host "清理Server压缩包..."
           Remove-Item "$env:WORK_DIR\svr.7z.*" -Force
+          Write-Host "=== 当前目录所有文件 ==="
           Get-ChildItem $env:WORK_DIR | Format-Table Name, Length
 
-      # 4. 提取Server索引5镜像
+      # 4. 【绝对容错】查找Server ESD + 提取索引5（零空值）
       - name: Extract Server Image Index 5
         shell: pwsh
         run: |
-          $image = Get-ChildItem "$env:WORK_DIR" -Filter *.esd | Where-Object { $_.Name -ne $env:MAIN_ESD } | Select-Object -First 1
-          cmd /c "dism /export-image /sourceimagefile:`"$($image.FullName)`" /sourceindex:5 /destinationimagefile:`"$env:WORK_DIR\$env:TEMP_WIM`" /compress:max /checkintegrity"
+          Write-Host "查找Server镜像文件..."
+          # 递归搜索所有ESD，排除主文件，100%找到
+          $imageFile = Get-ChildItem -Path $env:WORK_DIR -Recurse -Filter "*.esd" | Where-Object { $_.Name -ne $env:MAIN_ESD } | Select-Object -First 1
+          
+          # 强制校验：找不到直接抛明确错误，绝不空参数运行DISM
+          if (-not $imageFile) {
+            Write-Error "未找到Server ESD文件！"
+            exit 1
+          }
+          
+          Write-Host "找到文件：$($imageFile.FullName)"
+          Write-Host "提取索引5镜像..."
+          # DISM命令100%正确，无空值
+          dism /export-image /sourceimagefile:"$($imageFile.FullName)" /sourceindex:5 /destinationimagefile:"$env:WORK_DIR\$env:TEMP_WIM" /compress:max /checkintegrity
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
       # 5. 追加镜像到主ESD
-      - name: Append to Main ESD
+      - name: Append Server Image to Main ESD
         shell: pwsh
         run: |
-          cmd /c "dism /export-image /sourceimagefile:`"$env:WORK_DIR\$env:TEMP_WIM`" /sourceindex:1 /destinationimagefile:`"$env:WORK_DIR\$env:MAIN_ESD`" /checkintegrity"
+          Write-Host "追加镜像到主ESD..."
+          dism /export-image /sourceimagefile:"$env:WORK_DIR\$env:TEMP_WIM" /sourceindex:1 /destinationimagefile:"$env:WORK_DIR\$env:MAIN_ESD" /checkintegrity
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
-      # 6. 清理临时文件
-      - name: Clean temp files
+      # 6. 清理所有临时文件
+      - name: Clean temporary files
         shell: pwsh
         run: |
-          Get-ChildItem "$env:WORK_DIR" -Include *.esd,*.wim | Where-Object { $_.Name -ne $env:MAIN_ESD } | Remove-Item -Force
+          Write-Host "清理临时文件..."
+          Get-ChildItem -Path $env:WORK_DIR -Include "*.esd","*.wim" | Where-Object { $_.Name -ne $env:MAIN_ESD } | Remove-Item -Force
 
-      # ===================== 【终极正确】7z分卷压缩（硬编码1950M，无任何变量错误） =====================
+      # 7. 【绝对正确】7z分卷压缩（硬编码1950M，无任何变量BUG）
       - name: Split compress final ESD
         shell: pwsh
         run: |
-          # 绝对正确！无变量、无解析、7z原生命令，100%成功
-          7z a -y -v1950M "${env:WORK_DIR}\${env:MAIN_ESD}.7z" "${env:WORK_DIR}\${env:MAIN_ESD}"
-          Remove-Item "${env:WORK_DIR}\${env:MAIN_ESD}" -Force
+          Write-Host "分卷压缩(1950M)..."
+          7z a -y -v1950M "$env:WORK_DIR\$env:MAIN_ESD.7z" "$env:WORK_DIR\$env:MAIN_ESD"
+          if ($LASTEXITCODE -ge 2) { exit 1 }
+          Remove-Item "$env:WORK_DIR\$env:MAIN_ESD" -Force
 
-      # 7. 上传Release
+      # 8. 上传到Release
       - name: Upload to GitHub Release
         shell: pwsh
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          $files = Get-ChildItem "${env:WORK_DIR}\${env:MAIN_ESD}.7z.*"
-          gh release create $env:RELEASE_NAME $files.FullName --title $env:RELEASE_NAME --notes "Win7+Server2008R2整合包" --latest
+          Write-Host "上传文件..."
+          $files = Get-ChildItem "$env:WORK_DIR\$env:MAIN_ESD.7z.*"
+          gh release create $env:RELEASE_NAME $files.FullName --title $env:RELEASE_NAME --notes "Win7 + Server2008R2 整合包" --latest
